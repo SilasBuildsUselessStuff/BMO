@@ -33,7 +33,14 @@ enum Expression {
 };
 
 Screen currentScreen = FACE;
-Expression currentExpression = IDLE;
+
+Expression defaultExpression = HAPPY;
+Expression currentExpression = HAPPY;
+
+unsigned long expressionStartTime = 0;
+unsigned long expressionDuration = 0;
+
+bool expressionTimerActive = false;
 
 const char* getScreenName(Screen screen)
 {
@@ -90,23 +97,156 @@ void printCurrentState()
   Serial.println(getExpressionName(currentExpression));
 }
 
+void setExpression(Expression expression, unsigned long durationMs)
+{
+  currentExpression = expression;
+
+  expressionStartTime = millis();
+  expressionDuration = durationMs;
+
+  expressionTimerActive = true;
+
+  printCurrentState();
+}
+
 void printHelp()
 {
   Serial.println("");
   Serial.println("=== BMO DEBUG COMMANDS ===");
-  Serial.println("Screens:");
-  Serial.println("f = Face");
-  Serial.println("w = Weather");
-  Serial.println("s = Spotify");
+
+  Serial.println("");
+  Serial.println("Navigation");
+  Serial.println("r = Next Screen");
+  Serial.println("l = Previous Screen");
+  Serial.println("Screens");
+  Serial.println("f = FACE");
+  Serial.println("w = WEATHER");
+  Serial.println("s = SPOTIFY");
+
   Serial.println("");
 
-  Serial.println("Expressions:");
-  Serial.println("h = Happy");
-  Serial.println("a = Angry");
-  Serial.println("t = Thinking");
-  Serial.println("c = Confused");
-  Serial.println("i = Idle");
+  Serial.println("Expressions");
+  Serial.println("h = HAPPY");
+  Serial.println("a = ANGRY");
+  Serial.println("t = THINKING");
+  Serial.println("c = CONFUSED");
+  Serial.println("i = IDLE");
+
   Serial.println("");
+
+  Serial.println("? = HELP");
+}
+
+void nextScreen()
+{
+  switch(currentScreen)
+  {
+    case FACE:
+      currentScreen = WEATHER;
+      break;
+
+    case WEATHER:
+      currentScreen = SPOTIFY;
+      break;
+
+    case SPOTIFY:
+      currentScreen = TODO_SCREEN;
+      break;
+
+    case TODO_SCREEN:
+      currentScreen = CLOCK;
+      break;
+
+    case CLOCK:
+      currentScreen = GAMES;
+      break;
+
+    case GAMES:
+      currentScreen = CHANCE;
+      break;
+
+    case CHANCE:
+      currentScreen = ANIMATION;
+      break;
+
+    case ANIMATION:
+      currentScreen = SETTINGS;
+      break;
+
+    case SETTINGS:
+      currentScreen = SYSTEM_INFORMATION;
+      break;
+
+    case SYSTEM_INFORMATION:
+      currentScreen = NOTIFICATION_SCREEN;
+      break;
+
+    case NOTIFICATION_SCREEN:
+      currentScreen = LOW_BATTERY_SCREEN;
+      break;
+
+    case LOW_BATTERY_SCREEN:
+      currentScreen = FACE;
+      break;
+  }
+
+  printCurrentState();
+}
+
+void previousScreen()
+{
+  switch(currentScreen)
+  {
+    case FACE:
+      currentScreen = LOW_BATTERY_SCREEN;
+      break;
+
+    case WEATHER:
+      currentScreen = FACE;
+      break;
+
+    case SPOTIFY:
+      currentScreen = WEATHER;
+      break;
+
+    case TODO_SCREEN:
+      currentScreen = SPOTIFY;
+      break;
+
+    case CLOCK:
+      currentScreen = TODO_SCREEN;
+      break;
+
+    case GAMES:
+      currentScreen = CLOCK;
+      break;
+
+    case CHANCE:
+      currentScreen = GAMES;
+      break;
+
+    case ANIMATION:
+      currentScreen = CHANCE;
+      break;
+
+    case SETTINGS:
+      currentScreen = ANIMATION;
+      break;
+
+    case SYSTEM_INFORMATION:
+      currentScreen = SETTINGS;
+      break;
+
+    case NOTIFICATION_SCREEN:
+      currentScreen = SYSTEM_INFORMATION;
+      break;
+
+    case LOW_BATTERY_SCREEN:
+      currentScreen = NOTIFICATION_SCREEN;
+      break;
+  }
+
+  printCurrentState();
 }
 
 void setup()
@@ -120,7 +260,23 @@ void setup()
 
 void loop()
 {
-  if (Serial.available())
+  // Expression timeout handling
+
+  if(expressionTimerActive)
+  {
+    if(millis() - expressionStartTime >= expressionDuration)
+    {
+      currentExpression = defaultExpression;
+      expressionTimerActive = false;
+
+      Serial.println("Expression timeout.");
+      printCurrentState();
+    }
+  }
+
+  // Serial commands
+
+  if(Serial.available())
   {
     char cmd = Serial.read();
 
@@ -128,6 +284,14 @@ void loop()
     {
       // Screens
 
+      case 'r':
+            nextScreen();
+      return;
+
+      case 'l':
+             previousScreen();
+      return;
+      
       case 'f':
         currentScreen = FACE;
         break;
@@ -143,30 +307,36 @@ void loop()
       // Expressions
 
       case 'h':
-        currentExpression = HAPPY;
-        break;
+        setExpression(HAPPY, 10000);
+        return;
 
       case 'a':
-        currentExpression = ANGRY;
-        break;
+        setExpression(ANGRY, 15000);
+        return;
 
       case 't':
-        currentExpression = THINKING;
-        break;
+        setExpression(THINKING, 5000);
+        return;
 
       case 'c':
-        currentExpression = CONFUSED;
-        break;
+        setExpression(CONFUSED, 10000);
+        return;
 
       case 'i':
         currentExpression = IDLE;
+        expressionTimerActive = false;
         break;
 
       case '?':
         printHelp();
-        break;
+        return;
     }
 
     printCurrentState();
   }
 }
+
+    printCurrentState();
+  }
+}
+
