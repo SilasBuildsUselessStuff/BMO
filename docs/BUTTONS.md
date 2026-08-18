@@ -34,10 +34,10 @@ BLUE
 
 FaceScreen
   LEFT / RIGHT
-    Cycle Expressions
+    Cycle Widgets
  
   UP / DOWN
-    Cycle Widgets
+    Reserve
  
   GREEN
     Confirm
