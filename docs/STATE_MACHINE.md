@@ -1,0 +1,85 @@
+BOOT
+↓
+FACE
+↓
+MAIN_MENU
+  WEATHER
+  MUSIC
+  SETTINGS
+  GAME
+  SLEEP
+
+Expressions
+  IDLE
+  HAPPY
+  SAD
+  CONCERNED
+  ANGRY
+  SURPRISED
+  SLEEPY
+  SLEEPING
+  HYPED
+  DETECTIVE
+  MUSIC_ENJOYING
+  LISTENING
+  THINKING
+  TALKING
+  LOW_BATTERY
+  CONFUSED
+
+Screens
+  FACE
+  WEATHER
+  SPOTIFY
+  TODO
+  CLOCK
+  GAMES
+    Snake
+    Pong
+    Future
+  CHANCE
+    Coinflip
+    Fortune
+  ANIMATION
+    Dance
+    Screensaver
+    FunnyFace
+    MusicVisualizer
+  SETTINGS
+  LOW_BATTERY_SCREEN
+  SYSTEM_INFORMATION
+  NOTIFICATION_SCREEN
+
+Idlea Behaviours
+  YAWN
+  BLINK
+  LOOK_AROUND
+  SMILE
+  SIGH
+  ROLL_EYES
+  NOD
+
+Events
+  BUTTON_PRESS
+  BUTTON_LONGPRESS
+  TOUCH
+  
+  BATTERY_LOW
+  BATTERY_CHARGING
+  
+  MUSIC_STARTED
+  MUSIC_STOPPED
+  
+  VOICE_DETECTED
+  WAKE
+    
+  SLEEP_TIMER 
+  
+  SHAKE
+  TILT
+  PICKUP
+  
+  Notification
+  
+  COMPUTER_DISCONNECTED
+  
