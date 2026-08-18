@@ -1,3 +1,6 @@
+Goal:
+BMO Always appears alive, even without interaction.
+
 BOOT
 ↓
 FACE
