@@ -1,12 +1,1 @@
-<img width="480" height="160" alt="talk_mouth_open_o" src="https://github.com/user-attachments/assets/8d08c094-f312-41d4-861c-56ba25715971" />
-<img width="480" height="160" alt="talk_mouth_open_a" src="https://github.com/user-attachments/assets/271634df-c260-403a-a175-0bbdb297d428" />
-<img width="480" height="160" alt="talk_mouth_closed" src="https://github.com/user-attachments/assets/cefddb95-0359-495c-86e4-501a60c40114" />
-<img width="480" height="160" alt="swivel_mouth" src="https://github.com/user-attachments/assets/59461132-0ac7-480e-8c74-7c1507e8b2bc" />
-<img width="480" height="160" alt="surprised" src="https://github.com/user-attachments/assets/84f93905-7467-4c2e-8975-89bd45bc7fcb" />
-<img width="480" height="160" alt="smiling_mouth_open" src="https://github.com/user-attachments/assets/cc7b3ee0-c972-46bc-bd40-f3b90854e236" />
-<img width="480" height="160" alt="smile" src="https://github.com/user-attachments/assets/8dc70720-6933-4333-9727-cfe1c2836fdd" />
-<img width="480" height="160" alt="sad_open" src="https://github.com/user-attachments/assets/97165289-e8ef-4007-9f6c-46b93e1b3e02" />
-<img width="480" height="160" alt="pouting" src="https://github.com/user-attachments/assets/447a8ca2-54f6-4a0f-afe9-ef303a87af97" />
-<img width="480" height="160" alt="expressionless" src="https://github.com/user-attachments/assets/9c46563c-2096-4067-b811-ffb1fa9dc3a2" />
-<img width="480" height="160" alt="big_smile" src="https://github.com/user-attachments/assets/46268199-eaf1-4ec2-83fe-3918cae8cf51" />
-<img width="480" height="160" alt="whistle" src="https://github.com/user-attachments/assets/558ac1b2-7b92-4ff2-9529-a9971b4a634a" />
+
