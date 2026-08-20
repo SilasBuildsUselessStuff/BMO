@@ -9,24 +9,52 @@ void setup()
 
   delay(2000);
 
-  Serial.println("A");
+  Serial.println("START");
 
   SDSPI.begin(18, 19, 23);
 
-  Serial.println("B");
-
-  bool ok = SD.begin(5, SDSPI);
-
-  Serial.println("C");
-
-  if (ok)
-  {
-    Serial.println("SD OK");
-  }
-  else
+  if (!SD.begin(5, SDSPI))
   {
     Serial.println("SD FAIL");
+    return;
   }
+
+  Serial.println("SD OK");
+
+  File root = SD.open("/");
+
+  if (!root)
+  {
+    Serial.println("ROOT FAIL");
+    return;
+  }
+
+  Serial.println("ROOT OK");
+  Serial.println();
+
+  File file = root.openNextFile();
+
+  while (file)
+  {
+    if (file.isDirectory())
+    {
+      Serial.print("[DIR ] ");
+      Serial.println(file.name());
+    }
+    else
+    {
+      Serial.print("[FILE] ");
+      Serial.print(file.name());
+      Serial.print(" (");
+      Serial.print(file.size());
+      Serial.println(" bytes)");
+    }
+
+    file = root.openNextFile();
+  }
+
+  Serial.println();
+  Serial.println("DONE");
 }
 
 void loop()
