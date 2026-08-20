@@ -1,43 +1,10 @@
-#include <SPI.h>
-#include <SD.h>
-
-SPIClass SDSPI(VSPI);
-
 void setup()
 {
   Serial.begin(115200);
-
-  Serial.println("=== SD TEST ===");
-
-  SDSPI.begin(18, 19, 23);
-
-  if (!SD.begin(5, SDSPI))
-  {
-    Serial.println("SD FAILED");
-    return;
-  }
-
-  Serial.println("SD OK");
-
-  File root = SD.open("/");
-
-  while (true)
-  {
-    File file = root.openNextFile();
-
-    if (!file)
-    {
-      Serial.println("DONE");
-      break;
-    }
-
-    Serial.print("FILE: ");
-    Serial.println(file.name());
-
-    file.close();
-  }
+  Serial.println("SD TEST V2");
 }
 
 void loop()
 {
+  delay(1000);
 }
