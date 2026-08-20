@@ -1,29 +1,62 @@
-File assets = SD.open("/assets");
+#include <SPI.h>
+#include <SD.h>
 
-if (!assets)
+SPIClass SDSPI(VSPI);
+
+void setup()
 {
-  Serial.println("ASSETS FAIL");
-  return;
-}
+  Serial.begin(115200);
 
-Serial.println("ASSETS OK");
+  delay(2000);
 
-File file = assets.openNextFile();
+  Serial.println("START");
 
-while (file)
-{
-  if (file.isDirectory())
+  SDSPI.begin(18, 19, 23);
+
+  if (!SD.begin(5, SDSPI))
   {
-    Serial.print("[DIR ] ");
-    Serial.println(file.name());
-  }
-  else
-  {
-    Serial.print("[FILE] ");
-    Serial.println(file.name());
+    Serial.println("SD FAIL");
+    return;
   }
 
-  file = assets.openNextFile();
+  Serial.println("SD OK");
+
+  File eyes = SD.open("/assets/eyes");
+
+  if (!eyes)
+  {
+    Serial.println("EYES FAIL");
+    return;
+  }
+
+  Serial.println("EYES OK");
+  Serial.println();
+
+  File file = eyes.openNextFile();
+
+  while (file)
+  {
+    if (file.isDirectory())
+    {
+      Serial.print("[DIR ] ");
+      Serial.println(file.name());
+    }
+    else
+    {
+      Serial.print("[FILE] ");
+      Serial.print(file.name());
+      Serial.print(" (");
+      Serial.print(file.size());
+      Serial.println(" bytes)");
+    }
+
+    file = eyes.openNextFile();
+  }
+
+  Serial.println();
+  Serial.println("DONE");
 }
 
-Serial.println("DONE");
+void loop()
+{
+}
