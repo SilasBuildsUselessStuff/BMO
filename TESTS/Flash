@@ -1,10 +1,260 @@
+#define LGFX_USE_V1
+#include <LovyanGFX.hpp>
+
+// ============================================================
+// Display hardware configuration for ESP32-3248S035C
+// Display: ST7796, 320 x 480
+// Touch: GT911
+// ============================================================
+
+class LGFX : public lgfx::LGFX_Device
+{
+  lgfx::Panel_ST7796 _panel_instance;
+  lgfx::Bus_SPI _bus_instance;
+  lgfx::Light_PWM _light_instance;
+  lgfx::Touch_GT911 _touch_instance;
+
+public:
+  LGFX(void)
+  {
+    // --------------------------------------------------------
+    // SPI bus configuration
+    // --------------------------------------------------------
+
+    {
+      auto cfg = _bus_instance.config();
+
+      cfg.spi_host = HSPI_HOST;
+      cfg.spi_mode = 0;
+      cfg.freq_write = 80000000;
+      cfg.freq_read = 40000000;
+      cfg.spi_3wire = true;
+      cfg.use_lock = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+
+      cfg.pin_sclk = 14;
+      cfg.pin_mosi = 13;
+      cfg.pin_miso = 12;
+      cfg.pin_dc = 2;
+
+      _bus_instance.config(cfg);
+      _panel_instance.setBus(&_bus_instance);
+    }
+
+    // --------------------------------------------------------
+    // ST7796 display panel configuration
+    // --------------------------------------------------------
+
+    {
+      auto cfg = _panel_instance.config();
+
+      cfg.pin_cs = 15;
+      cfg.pin_rst = -1;
+      cfg.pin_busy = -1;
+
+      cfg.panel_width = 320;
+      cfg.panel_height = 480;
+
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
+
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits = 1;
+
+      cfg.readable = true;
+      cfg.invert = false;
+      cfg.rgb_order = false;
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = true;
+
+      _panel_instance.config(cfg);
+    }
+
+    // --------------------------------------------------------
+    // Backlight configuration
+    // --------------------------------------------------------
+
+    {
+      auto cfg = _light_instance.config();
+
+      cfg.pin_bl = 27;
+      cfg.invert = false;
+      cfg.freq = 1200;
+      cfg.pwm_channel = 7;
+
+      _light_instance.config(cfg);
+      _panel_instance.setLight(&_light_instance);
+    }
+
+    // --------------------------------------------------------
+    // GT911 capacitive touch configuration
+    // --------------------------------------------------------
+
+    {
+      auto cfg = _touch_instance.config();
+
+      cfg.pin_int = GPIO_NUM_36;
+      cfg.pin_sda = GPIO_NUM_33;
+      cfg.pin_scl = GPIO_NUM_32;
+
+      cfg.i2c_addr = 0x5D;
+      cfg.i2c_port = I2C_NUM_0;
+      cfg.freq = 800000;
+
+      cfg.x_min = 14;
+      cfg.x_max = 310;
+      cfg.y_min = 5;
+      cfg.y_max = 448;
+
+      cfg.offset_rotation = 0;
+      cfg.bus_shared = false;
+
+      _touch_instance.config(cfg);
+      _panel_instance.setTouch(&_touch_instance);
+    }
+
+    setPanel(&_panel_instance);
+  }
+};
+
+// ============================================================
+// Display instance
+// ============================================================
+
+LGFX display;
+
+// ============================================================
+// Colors
+// ============================================================
+
+uint16_t backgroundColor;
+uint16_t faceColor;
+uint16_t accentColor;
+uint16_t textColor;
+
+// ============================================================
+// Draw BMO test face
+// ============================================================
+
+void drawBmoFace()
+{
+  display.fillScreen(backgroundColor);
+
+  // Title
+  display.setTextColor(textColor, backgroundColor);
+  display.setTextDatum(textdatum_t::top_center);
+  display.setTextSize(2);
+  display.drawString("BMO DISPLAY TEST", 160, 20);
+
+  // Eyes
+  display.fillCircle(95, 155, 16, faceColor);
+  display.fillCircle(225, 155, 16, faceColor);
+
+  // Small eye highlights
+  display.fillCircle(90, 150, 4, backgroundColor);
+  display.fillCircle(220, 150, 4, backgroundColor);
+
+  // Smile
+  display.drawArc(
+    160,
+    210,
+    44,
+    35,
+    20,
+    160,
+    faceColor
+  );
+
+  // Information area
+  display.drawRoundRect(
+    20,
+    300,
+    280,
+    135,
+    12,
+    accentColor
+  );
+
+  display.setTextDatum(textdatum_t::middle_center);
+  display.setTextSize(2);
+  display.setTextColor(textColor, backgroundColor);
+
+  display.drawString(
+    "Display: ST7796",
+    160,
+    330
+  );
+
+  display.drawString(
+    "Resolution: 320 x 480",
+    160,
+    365
+  );
+
+  display.drawString(
+    "Touch the screen",
+    160,
+    400
+  );
+}
+
+// ============================================================
+// Draw touch marker
+// ============================================================
+
+void drawTouchMarker(uint16_t x, uint16_t y)
+{
+  display.fillCircle(x, y, 10, accentColor);
+  display.drawCircle(x, y, 14, textColor);
+}
+
+// ============================================================
+// Setup
+// ============================================================
+
 void setup()
 {
   Serial.begin(115200);
+
+  Serial.println();
+  Serial.println("BMO Display Test Starting...");
+
+  display.init();
+  display.setRotation(0);
+  display.setBrightness(200);
+  display.setColorDepth(16);
+
+  backgroundColor = display.color565(154, 218, 190);
+  faceColor = display.color565(20, 45, 50);
+  accentColor = display.color565(20, 180, 210);
+  textColor = display.color565(255, 255, 255);
+
+  drawBmoFace();
+
+  Serial.println("Display initialized.");
+  Serial.println("Touch the display to test coordinates.");
 }
+
+// ============================================================
+// Main loop
+// ============================================================
 
 void loop()
 {
-  Serial.println("BMO Running...");
-  delay(1000);
+  uint16_t touchX;
+  uint16_t touchY;
+
+  if (display.getTouch(&touchX, &touchY))
+  {
+    Serial.print("Touch X: ");
+    Serial.print(touchX);
+
+    Serial.print(" | Y: ");
+    Serial.println(touchY);
+
+    drawTouchMarker(touchX, touchY);
+
+    delay(100);
+  }
 }
