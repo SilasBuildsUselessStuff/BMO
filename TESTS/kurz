@@ -1,25 +1,13 @@
 void setup()
-2
 {
-3
-Serial.begin(115200);
-4
-delay(1000);
-5
- 
-6
-Serial.println("BOOT");
-7
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println("BOOT");
 }
-8
- 
-9
+
 void loop()
-10
 {
-11
-Serial.println("ALIVE");
-12
-delay(1000);
-13
+  Serial.println("ALIVE");
+  delay(1000);
 }
