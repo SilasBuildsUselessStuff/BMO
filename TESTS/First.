@@ -1,20 +1,70 @@
-#include <TFT_eSPI.h>
+#include <SPI.h>
+#include <SD.h>
 
-TFT_eSPI tft = TFT_eSPI();
+#define SD_CS   5
 
 void setup()
 {
-  tft.init();
-  tft.setRotation(1);
+  Serial.begin(115200);
 
-  tft.fillScreen(TFT_BLACK);
+  Serial.println();
+  Serial.println("=== SD TEST ===");
 
-  tft.setTextColor(TFT_GREEN);
-  tft.setTextSize(4);
+  if (!SD.begin(SD_CS))
+  {
+    Serial.println("SD init FAILED");
+    return;
+  }
 
-  tft.drawCentreString("BMO",160,100,2);
+  Serial.println("SD init OK");
+  Serial.println();
+
+  listDir("/", 0);
 }
 
 void loop()
 {
+}
+
+void listDir(const char * dirname, uint8_t levels)
+{
+  File root = SD.open(dirname);
+
+  if (!root)
+  {
+    Serial.println("Failed to open directory");
+    return;
+  }
+
+  if (!root.isDirectory())
+  {
+    Serial.println("Not a directory");
+    return;
+  }
+
+  File file = root.openNextFile();
+
+  while (file)
+  {
+    if (file.isDirectory())
+    {
+      Serial.print("[DIR ] ");
+      Serial.println(file.name());
+
+      if (levels)
+      {
+        listDir(file.path(), levels - 1);
+      }
+    }
+    else
+    {
+      Serial.print("[FILE] ");
+      Serial.print(file.name());
+      Serial.print(" (");
+      Serial.print(file.size());
+      Serial.println(" bytes)");
+    }
+
+    file = root.openNextFile();
+  }
 }
