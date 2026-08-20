@@ -1,34 +1,12 @@
 #include <SPI.h>
 #include <SD.h>
 
-SPIClass SDSPI(VSPI);
-
 void setup()
 {
   Serial.begin(115200);
-
   delay(1000);
 
-  Serial.println("1");
-
-  SDSPI.begin(18, 19, 23);
-
-  Serial.println("2");
-
-  bool ok = SD.begin(5, SDSPI);
-
-  Serial.println("3");
-
-  if (ok)
-  {
-    Serial.println("SD OK");
-  }
-  else
-  {
-    Serial.println("SD FAIL");
-  }
-
-  Serial.println("END SETUP");
+  Serial.println("TEST A");
 }
 
 void loop()
