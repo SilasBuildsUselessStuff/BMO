@@ -6,13 +6,27 @@ SPIClass SDSPI(VSPI);
 void setup()
 {
   Serial.begin(115200);
-  delay(1000);
 
-  Serial.println("TEST A");
+  delay(2000);
 
-  SDSPI.begin(18,19,23);
+  Serial.println("A");
 
-  Serial.println("TEST B");
+  SDSPI.begin(18, 19, 23);
+
+  Serial.println("B");
+
+  bool ok = SD.begin(5, SDSPI);
+
+  Serial.println("C");
+
+  if (ok)
+  {
+    Serial.println("SD OK");
+  }
+  else
+  {
+    Serial.println("SD FAIL");
+  }
 }
 
 void loop()
