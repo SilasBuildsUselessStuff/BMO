@@ -1,17 +1,17 @@
 #include <SPI.h>
 #include <SD.h>
 
-#define SD_CS 4
+SPIClass SDSPI(VSPI);
 
 void setup()
 {
   Serial.begin(115200);
 
-  delay(1000);
-
   Serial.println("=== SD TEST ===");
 
-  if (!SD.begin(SD_CS))
+  SDSPI.begin(18, 19, 23);
+
+  if (!SD.begin(5, SDSPI))
   {
     Serial.println("SD FAILED");
     return;
