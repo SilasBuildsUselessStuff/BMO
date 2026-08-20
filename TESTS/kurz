@@ -1,62 +1,29 @@
-#include <SPI.h>
-#include <SD.h>
+File assets = SD.open("/assets");
 
-SPIClass SDSPI(VSPI);
-
-void setup()
+if (!assets)
 {
-  Serial.begin(115200);
-
-  delay(2000);
-
-  Serial.println("START");
-
-  SDSPI.begin(18, 19, 23);
-
-  if (!SD.begin(5, SDSPI))
-  {
-    Serial.println("SD FAIL");
-    return;
-  }
-
-  Serial.println("SD OK");
-
-  File root = SD.open("/");
-
-  if (!root)
-  {
-    Serial.println("ROOT FAIL");
-    return;
-  }
-
-  Serial.println("ROOT OK");
-  Serial.println();
-
-  File file = root.openNextFile();
-
-  while (file)
-  {
-    if (file.isDirectory())
-    {
-      Serial.print("[DIR ] ");
-      Serial.println(file.name());
-    }
-    else
-    {
-      Serial.print("[FILE] ");
-      Serial.print(file.name());
-      Serial.print(" (");
-      Serial.print(file.size());
-      Serial.println(" bytes)");
-    }
-
-    file = root.openNextFile();
-  }
-
-  Serial.println();
-  Serial.println("DONE");
+  Serial.println("ASSETS FAIL");
+  return;
 }
 
-void loop()
+Serial.println("ASSETS OK");
+
+File file = assets.openNextFile();
+
+while (file)
 {
+  if (file.isDirectory())
+  {
+    Serial.print("[DIR ] ");
+    Serial.println(file.name());
+  }
+  else
+  {
+    Serial.print("[FILE] ");
+    Serial.println(file.name());
+  }
+
+  file = assets.openNextFile();
 }
+
+Serial.println("DONE");
