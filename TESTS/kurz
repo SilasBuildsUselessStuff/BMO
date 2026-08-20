@@ -1,10 +1,25 @@
 void setup()
+2
 {
-  Serial.begin(115200);
-  Serial.println("SD TEST V2");
+3
+Serial.begin(115200);
+4
+delay(1000);
+5
+ 
+6
+Serial.println("BOOT");
+7
 }
-
+8
+ 
+9
 void loop()
+10
 {
-  delay(1000);
+11
+Serial.println("ALIVE");
+12
+delay(1000);
+13
 }
