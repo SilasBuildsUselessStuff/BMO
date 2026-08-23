@@ -1,27 +1,9 @@
-#include <SD.h>
-
 void setup()
 {
   Serial.begin(115200);
+  delay(3000);
 
-  if (!SD.begin(5))
-  {
-    Serial.println("SD FAIL");
-    return;
-  }
-
-  File test = SD.open("/assets/background/default.png");
-
-  if (test)
-  {
-    Serial.println("PNG FOUND");
-    Serial.println(test.size());
-    test.close();
-  }
-  else
-  {
-    Serial.println("PNG NOT FOUND");
-  }
+  Serial.println("BOOT OK");
 }
 
 void loop()
