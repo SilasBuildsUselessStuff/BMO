@@ -1,25 +1,41 @@
+#include <Wire.h>
+
 void setup()
 {
   Serial.begin(115200);
   delay(2000);
 
-  pinMode(21, INPUT_PULLUP);
-  pinMode(22, INPUT_PULLUP);
-  pinMode(35, INPUT);
+  Serial.println("I2C SCAN");
 
-  Serial.println("GPIO TEST");
+  Wire.begin(21, 22);
+
+  bool found = false;
+
+  for (uint8_t address = 1; address < 127; address++)
+  {
+    Wire.beginTransmission(address);
+
+    if (Wire.endTransmission() == 0)
+    {
+      Serial.print("FOUND: 0x");
+
+      if (address < 16)
+        Serial.print("0");
+
+      Serial.println(address, HEX);
+
+      found = true;
+    }
+  }
+
+  if (!found)
+  {
+    Serial.println("NO DEVICES FOUND");
+  }
+
+  Serial.println("SCAN DONE");
 }
 
 void loop()
 {
-  Serial.print("21=");
-  Serial.print(digitalRead(21));
-
-  Serial.print(" 22=");
-  Serial.print(digitalRead(22));
-
-  Serial.print(" 35=");
-  Serial.println(digitalRead(35));
-
-  delay(1000);
 }
