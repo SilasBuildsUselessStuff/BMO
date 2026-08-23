@@ -1,27 +1,15 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <SD.h>
-#include "AudioFileSourceSD.h"
-#include "AudioFileSourceID3.h"
-#include "AudioGeneratorMP3.h"
-#include "AudioOutputI2S.h"
-
-AudioFileSourceSD *file;
-AudioGeneratorMP3 *mp3;
-AudioFileSourceID3 *id3;
-AudioOutputI2S *out;
 
 SPIClass SDSPI(VSPI);
 
 void setup()
 {
   Serial.begin(115200);
-  Serial.println();
+  delay(2000);
 
-  WiFi.mode(WIFI_OFF);
-  delay(500);
-
-  Serial.println("Starting...");
+  Serial.println("START");
 
   pinMode(5, OUTPUT);
   digitalWrite(5, HIGH);
@@ -37,46 +25,27 @@ void setup()
 
   Serial.println("SD OK");
 
-  File f = SD.open("/test.mp3");
+  File root = SD.open("/");
 
-  if (!f)
+  while (true)
   {
-    Serial.println("TEST.MP3 NOT FOUND");
-    return;
+    File file = root.openNextFile();
+
+    if (!file)
+      break;
+
+    Serial.print("FILE: ");
+    Serial.print(file.name());
+
+    Serial.print(" SIZE=");
+    Serial.println(file.size());
+
+    file.close();
   }
 
-  Serial.print("TEST.MP3 FOUND, SIZE=");
-  Serial.println(f.size());
-  f.close();
-
-  file = new AudioFileSourceSD("/test.mp3");
-  id3 = new AudioFileSourceID3(file);
-
-  out = new AudioOutputI2S(0, 2, 8, -1);
-  out->SetOutputModeMono(true);
-  out->SetGain(1.0);
-
-  mp3 = new AudioGeneratorMP3();
-
-  Serial.println("Starting MP3...");
-
-  if (!mp3->begin(id3, out))
-  {
-    Serial.println("MP3 START FAILED");
-    return;
-  }
-
-  Serial.println("MP3 STARTED");
+  Serial.println("DONE");
 }
 
 void loop()
 {
-  if (mp3 && mp3->isRunning())
-  {
-    if (!mp3->loop())
-    {
-      Serial.println("MP3 FINISHED OR ERROR");
-      mp3->stop();
-    }
-  }
 }
