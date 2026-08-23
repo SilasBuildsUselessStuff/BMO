@@ -1,44 +1,340 @@
+#define LGFX_USE_V1
+
+#include <Arduino.h>
+#include <LovyanGFX.hpp>
+#include <SPI.h>
+#include <SD.h>
+
+// ============================================================
+// DISPLAY CONFIGURATION
+// Board: ESP32-3248S035C
+// Display: ST7796
+// Landscape resolution: 480 x 320
+// ============================================================
+
+class LGFX : public lgfx::LGFX_Device
+{
+  lgfx::Panel_ST7796 panel;
+  lgfx::Bus_SPI bus;
+  lgfx::Light_PWM backlight;
+
+public:
+  LGFX()
+  {
+    // --------------------------------------------------------
+    // Display SPI bus
+    // --------------------------------------------------------
+
+    {
+      auto cfg = bus.config();
+
+      cfg.spi_host = HSPI_HOST;
+      cfg.spi_mode = 0;
+
+      cfg.freq_write = 80000000;
+      cfg.freq_read = 40000000;
+
+      cfg.spi_3wire = true;
+      cfg.use_lock = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+
+      cfg.pin_sclk = 14;
+      cfg.pin_mosi = 13;
+      cfg.pin_miso = 12;
+      cfg.pin_dc = 2;
+
+      bus.config(cfg);
+      panel.setBus(&bus);
+    }
+
+    // --------------------------------------------------------
+    // ST7796 panel
+    // --------------------------------------------------------
+
+    {
+      auto cfg = panel.config();
+
+      cfg.pin_cs = 15;
+      cfg.pin_rst = -1;
+      cfg.pin_busy = -1;
+
+      cfg.panel_width = 320;
+      cfg.panel_height = 480;
+
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
+
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits = 1;
+
+      cfg.readable = true;
+      cfg.invert = false;
+      cfg.rgb_order = false;
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = true;
+
+      panel.config(cfg);
+    }
+
+    // --------------------------------------------------------
+    // Backlight
+    // --------------------------------------------------------
+
+    {
+      auto cfg = backlight.config();
+
+      cfg.pin_bl = 27;
+      cfg.invert = false;
+      cfg.freq = 1200;
+      cfg.pwm_channel = 7;
+
+      backlight.config(cfg);
+      panel.setLight(&backlight);
+    }
+
+    setPanel(&panel);
+  }
+};
+
+// ============================================================
+// HARDWARE OBJECTS
+// ============================================================
+
+LGFX display;
+SPIClass SDSPI(VSPI);
+
+// ============================================================
+// SD CARD CONFIGURATION
+// ============================================================
+
+static const int SD_CS = 5;
+static const int SD_SCLK = 18;
+static const int SD_MISO = 19;
+static const int SD_MOSI = 23;
+
+// ============================================================
+// PNG PATH
+// ============================================================
+
+static const char* PNG_PATH =
+  "/assets/background/default.png";
+
+// ============================================================
+// ERROR SCREEN
+// ============================================================
+
+void showError(const char* title, const char* message)
+{
+  display.fillScreen(
+    display.color565(20, 20, 20)
+  );
+
+  display.setTextColor(
+    display.color565(255, 80, 80)
+  );
+
+  display.setTextSize(2);
+  display.setCursor(20, 30);
+  display.println(title);
+
+  display.setTextColor(
+    display.color565(255, 255, 255)
+  );
+
+  display.setCursor(20, 70);
+  display.println(message);
+
+  display.setCursor(20, 110);
+  display.println("Check Serial Monitor.");
+}
+
+// ============================================================
+// LOAD AND DRAW PNG
+//
+// This avoids drawPngFile(SD, ...), which produced the
+// DataWrapperT<SDFS> compilation error.
+//
+// Instead:
+// 1. Open the PNG with Arduino SD.
+// 2. Load the PNG bytes into RAM.
+// 3. Let LovyanGFX decode the byte array.
+// ============================================================
+
+bool loadAndDrawPng(
+  const char* path,
+  int32_t x,
+  int32_t y
+)
+{
+  Serial.print("Opening PNG: ");
+  Serial.println(path);
+
+  File pngFile = SD.open(path, FILE_READ);
+
+  if (!pngFile)
+  {
+    Serial.println("PNG OPEN FAILED");
+    return false;
+  }
+
+  size_t pngSize = pngFile.size();
+
+  Serial.print("PNG size: ");
+  Serial.print(pngSize);
+  Serial.println(" bytes");
+
+  if (pngSize == 0)
+  {
+    Serial.println("PNG FILE IS EMPTY");
+    pngFile.close();
+    return false;
+  }
+
+  Serial.print("Free heap before allocation: ");
+  Serial.println(ESP.getFreeHeap());
+
+  uint8_t* pngBuffer =
+    static_cast<uint8_t*>(malloc(pngSize));
+
+  if (pngBuffer == nullptr)
+  {
+    Serial.println("PNG MEMORY ALLOCATION FAILED");
+    pngFile.close();
+    return false;
+  }
+
+  size_t bytesRead = pngFile.read(
+    pngBuffer,
+    pngSize
+  );
+
+  pngFile.close();
+
+  Serial.print("PNG bytes read: ");
+  Serial.println(bytesRead);
+
+  if (bytesRead != pngSize)
+  {
+    Serial.println("PNG READ INCOMPLETE");
+    free(pngBuffer);
+    return false;
+  }
+
+  Serial.println("Decoding PNG...");
+
+  bool drawResult = display.drawPng(
+    pngBuffer,
+    pngSize,
+    x,
+    y
+  );
+
+  free(pngBuffer);
+
+  Serial.print("Free heap after drawing: ");
+  Serial.println(ESP.getFreeHeap());
+
+  if (!drawResult)
+  {
+    Serial.println("PNG DECODING FAILED");
+    return false;
+  }
+
+  Serial.println("PNG DRAW SUCCESS");
+
+  return true;
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+
 void setup()
 {
   Serial.begin(115200);
+
+  // Required because early output was previously missed.
   delay(2000);
+
+  Serial.println();
+  Serial.println("=== BMO PNG TEST ===");
+
+  // ----------------------------------------------------------
+  // Initialize display
+  // ----------------------------------------------------------
+
+  Serial.println("Initializing display...");
 
   display.init();
   display.setRotation(1);
+  display.setBrightness(180);
+  display.setColorDepth(16);
+  display.setSwapBytes(true);
 
-  display.fillScreen(TFT_BLACK);
+  display.fillScreen(
+    display.color565(0, 0, 0)
+  );
 
-  pinMode(5, OUTPUT);
-  digitalWrite(5, HIGH);
+  Serial.print("Display size: ");
+  Serial.print(display.width());
+  Serial.print(" x ");
+  Serial.println(display.height());
 
-  SDSPI.begin(18, 19, 23);
+  // ----------------------------------------------------------
+  // Initialize SD card
+  // ----------------------------------------------------------
+
+  Serial.println("Initializing SD card...");
+
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  SDSPI.begin(
+    SD_SCLK,
+    SD_MISO,
+    SD_MOSI,
+    SD_CS
+  );
+
   SDSPI.setFrequency(1000000);
 
-  if (!SD.begin(5, SDSPI))
+  if (!SD.begin(SD_CS, SDSPI))
   {
-    Serial.println("SD FAIL");
+    Serial.println("SD INITIALIZATION FAILED");
+
+    showError(
+      "SD ERROR",
+      "Could not initialize SD card."
+    );
+
     return;
   }
 
-  Serial.println("SD OK");
+  Serial.println("SD INITIALIZATION SUCCESS");
 
-  File test = SD.open("/assets/background/default.png");
+  // ----------------------------------------------------------
+  // Draw background PNG
+  // ----------------------------------------------------------
 
-  if (!test)
+  if (!loadAndDrawPng(PNG_PATH, 0, 0))
   {
-    Serial.println("PNG NOT FOUND");
+    showError(
+      "PNG ERROR",
+      "Could not display default.png."
+    );
+
     return;
   }
 
-  Serial.print("PNG SIZE=");
-  Serial.println(test.size());
+  Serial.println("BACKGROUND TEST COMPLETE");
+}
 
-  test.close();
+// ============================================================
+// MAIN LOOP
+// ============================================================
 
-  display.setTextColor(TFT_WHITE);
-  display.setTextSize(2);
-  display.setCursor(20, 20);
-
-  display.println("SD OK");
-  display.println("PNG FOUND");
+void loop()
+{
+  // Nothing required for the static PNG test.
 }
