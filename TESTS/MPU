@@ -3,20 +3,16 @@
 void setup()
 {
   Serial.begin(115200);
-  Serial.println("DAC TEST");
+  Serial.println("PWM TEST");
 }
 
 void loop()
 {
-  for (int i = 0; i < 256; i++)
-  {
-    dacWrite(25, i);
-    delayMicroseconds(50);
-  }
+  ledcAttach(26, 1000, 8); // Pin, Frequency, Resolution
+  ledcWrite(26, 128);      // 50% Duty
 
-  for (int i = 255; i >= 0; i--)
+  while(true)
   {
-    dacWrite(25, i);
-    delayMicroseconds(50);
+    delay(1000);
   }
 }
