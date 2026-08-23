@@ -1,0 +1,44 @@
+#include <Wire.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+
+Adafruit_MPU6050 mpu;
+
+void setup()
+{
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println("MPU6050 Test");
+
+  Wire.begin(21, 22);
+
+  if (!mpu.begin())
+  {
+    Serial.println("MPU6050 NOT FOUND");
+    while (1)
+    {
+      delay(1000);
+    }
+  }
+
+  Serial.println("MPU6050 FOUND");
+}
+
+void loop()
+{
+  sensors_event_t a, g, temp;
+
+  mpu.getEvent(&a, &g, &temp);
+
+  Serial.print("X: ");
+  Serial.print(a.acceleration.x);
+
+  Serial.print("  Y: ");
+  Serial.print(a.acceleration.y);
+
+  Serial.print("  Z: ");
+  Serial.println(a.acceleration.z);
+
+  delay(500);
+}
