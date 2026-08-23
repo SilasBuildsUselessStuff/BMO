@@ -1,60 +1,44 @@
-#define LGFX_USE_V1
-#include <LovyanGFX.hpp>
-
-class LGFX : public lgfx::LGFX_Device
-{
-  lgfx::Panel_ST7796 _panel;
-  lgfx::Bus_SPI _bus;
-  lgfx::Light_PWM _light;
-
-public:
-  LGFX()
-  {
-    {
-      auto cfg = _bus.config();
-      cfg.spi_host = HSPI_HOST;
-      cfg.pin_sclk = 14;
-      cfg.pin_mosi = 13;
-      cfg.pin_miso = 12;
-      cfg.pin_dc   = 2;
-      cfg.freq_write = 80000000;
-      _bus.config(cfg);
-      _panel.setBus(&_bus);
-    }
-
-    {
-      auto cfg = _panel.config();
-      cfg.pin_cs = 15;
-      cfg.pin_rst = -1;
-      _panel.config(cfg);
-    }
-
-    {
-      auto cfg = _light.config();
-      cfg.pin_bl = 27;
-      cfg.pwm_channel = 7;
-      _light.config(cfg);
-      _panel.setLight(&_light);
-    }
-
-    setPanel(&_panel);
-  }
-};
-
-LGFX display;
-
 void setup()
 {
   Serial.begin(115200);
+  delay(2000);
 
   display.init();
   display.setRotation(1);
 
-  display.fillScreen(TFT_RED);
+  display.fillScreen(TFT_BLACK);
 
-  Serial.println("DISPLAY OK");
-}
+  pinMode(5, OUTPUT);
+  digitalWrite(5, HIGH);
 
-void loop()
-{
+  SDSPI.begin(18, 19, 23);
+  SDSPI.setFrequency(1000000);
+
+  if (!SD.begin(5, SDSPI))
+  {
+    Serial.println("SD FAIL");
+    return;
+  }
+
+  Serial.println("SD OK");
+
+  File test = SD.open("/assets/background/default.png");
+
+  if (!test)
+  {
+    Serial.println("PNG NOT FOUND");
+    return;
+  }
+
+  Serial.print("PNG SIZE=");
+  Serial.println(test.size());
+
+  test.close();
+
+  display.setTextColor(TFT_WHITE);
+  display.setTextSize(2);
+  display.setCursor(20, 20);
+
+  display.println("SD OK");
+  display.println("PNG FOUND");
 }
