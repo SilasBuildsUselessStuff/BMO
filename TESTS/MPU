@@ -9,9 +9,7 @@ void setup()
   Serial.begin(115200);
   delay(2000);
 
-  Serial.println("INMP441 Test");
-
-  i2s_config_t i2s_config =
+  i2s_config_t cfg =
   {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
     .sample_rate = 16000,
@@ -26,34 +24,43 @@ void setup()
     .fixed_mclk = 0
   };
 
-  i2s_pin_config_t pin_config =
+  i2s_pin_config_t pins =
   {
     .bck_io_num = I2S_SCK,
-    .ws_io_num  = I2S_WS,
+    .ws_io_num = I2S_WS,
     .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num  = I2S_SD
+    .data_in_num = I2S_SD
   };
 
-  i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-  i2s_set_pin(I2S_NUM_0, &pin_config);
+  i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
+  i2s_set_pin(I2S_NUM_0, &pins);
 
-  Serial.println("Started");
+  Serial.println("MIC TEST");
 }
 
 void loop()
 {
-  int32_t sample = 0;
-  size_t bytesRead = 0;
+  int32_t sample[128];
+  size_t bytesRead;
 
   i2s_read(
       I2S_NUM_0,
-      &sample,
+      sample,
       sizeof(sample),
       &bytesRead,
       portMAX_DELAY);
 
-  Serial.println(sample);
+  long peak = 0;
+
+  for(int i=0;i<128;i++)
+  {
+    long v = abs(sample[i]);
+
+    if(v > peak)
+      peak = v;
+  }
+
+  Serial.println(peak);
 
   delay(100);
-}
 }
