@@ -114,27 +114,76 @@ static const int SD_MISO = 19;
 static const int SD_MOSI = 23;
 
 // ============================================================
-// PNG PATH
+// ASSET PATHS
 // ============================================================
 
-static const char* PNG_PATH =
-  "/assets/background/default.png";
+static const char* BACKGROUND_PATH =
+  "/assets/backgrounds/default.png";
+
+static const char* EYES_NEUTRAL_PATH =
+  "/assets/eyes/neutral.png";
+
+static const char* EYES_BLINK_PATH =
+  "/assets/eyes/blink.png";
+
+static const char* MOUTH_PATH =
+  "/assets/mouth/expressionless.png";
+
+// ============================================================
+// FACE POSITIONING
+//
+// Adjust these values later after seeing the real result.
+//
+// Eyes and mouth are intentionally close together to produce
+// the compact BMO ._. face instead of a vertically stretched
+// face.
+// ============================================================
+
+static const int EYES_X = 0;
+static const int EYES_Y = 20;
+
+static const int MOUTH_X = 0;
+static const int MOUTH_Y = 105;
+
+// ============================================================
+// BLINK SETTINGS
+// ============================================================
+
+static const unsigned long BLINK_DURATION_MS = 130;
+
+static const unsigned long BLINK_MIN_INTERVAL_MS = 3000;
+static const unsigned long BLINK_MAX_INTERVAL_MS = 7500;
+
+// ============================================================
+// ANIMATION STATE
+// ============================================================
+
+bool isBlinking = false;
+bool faceNeedsRedraw = false;
+bool setupComplete = false;
+
+unsigned long blinkStartedAt = 0;
+unsigned long nextBlinkAt = 0;
 
 // ============================================================
 // ERROR SCREEN
 // ============================================================
 
-void showError(const char* title, const char* message)
+void showError(
+  const char* title,
+  const char* message
+)
 {
   display.fillScreen(
     display.color565(20, 20, 20)
   );
 
+  display.setTextSize(2);
+
   display.setTextColor(
     display.color565(255, 80, 80)
   );
 
-  display.setTextSize(2);
   display.setCursor(20, 30);
   display.println(title);
 
@@ -142,23 +191,51 @@ void showError(const char* title, const char* message)
     display.color565(255, 255, 255)
   );
 
-  display.setCursor(20, 70);
+  display.setCursor(20, 75);
   display.println(message);
 
-  display.setCursor(20, 110);
+  display.setCursor(20, 120);
   display.println("Check Serial Monitor.");
+}
+
+// ============================================================
+// FILE CHECK
+// ============================================================
+
+bool fileExists(const char* path)
+{
+  File file = SD.open(path, FILE_READ);
+
+  if (!file)
+  {
+    Serial.print("Missing file: ");
+    Serial.println(path);
+
+    return false;
+  }
+
+  Serial.print("Found: ");
+  Serial.print(path);
+  Serial.print(" | ");
+  Serial.print(file.size());
+  Serial.println(" bytes");
+
+  file.close();
+
+  return true;
 }
 
 // ============================================================
 // LOAD AND DRAW PNG
 //
-// This avoids drawPngFile(SD, ...), which produced the
-// DataWrapperT<SDFS> compilation error.
+// This is the same memory-buffer method that successfully
+// displayed your background PNG.
 //
-// Instead:
-// 1. Open the PNG with Arduino SD.
-// 2. Load the PNG bytes into RAM.
-// 3. Let LovyanGFX decode the byte array.
+// The PNG is:
+// 1. Opened from SD
+// 2. Loaded into RAM
+// 3. Decoded by LovyanGFX
+// 4. Removed from RAM afterwards
 // ============================================================
 
 bool loadAndDrawPng(
@@ -167,39 +244,35 @@ bool loadAndDrawPng(
   int32_t y
 )
 {
-  Serial.print("Opening PNG: ");
-  Serial.println(path);
-
   File pngFile = SD.open(path, FILE_READ);
 
   if (!pngFile)
   {
-    Serial.println("PNG OPEN FAILED");
+    Serial.print("PNG OPEN FAILED: ");
+    Serial.println(path);
+
     return false;
   }
 
   size_t pngSize = pngFile.size();
 
-  Serial.print("PNG size: ");
-  Serial.print(pngSize);
-  Serial.println(" bytes");
-
   if (pngSize == 0)
   {
-    Serial.println("PNG FILE IS EMPTY");
+    Serial.print("PNG FILE EMPTY: ");
+    Serial.println(path);
+
     pngFile.close();
     return false;
   }
-
-  Serial.print("Free heap before allocation: ");
-  Serial.println(ESP.getFreeHeap());
 
   uint8_t* pngBuffer =
     static_cast<uint8_t*>(malloc(pngSize));
 
   if (pngBuffer == nullptr)
   {
-    Serial.println("PNG MEMORY ALLOCATION FAILED");
+    Serial.print("PNG MEMORY FAILED: ");
+    Serial.println(path);
+
     pngFile.close();
     return false;
   }
@@ -211,17 +284,14 @@ bool loadAndDrawPng(
 
   pngFile.close();
 
-  Serial.print("PNG bytes read: ");
-  Serial.println(bytesRead);
-
   if (bytesRead != pngSize)
   {
-    Serial.println("PNG READ INCOMPLETE");
+    Serial.print("PNG READ FAILED: ");
+    Serial.println(path);
+
     free(pngBuffer);
     return false;
   }
-
-  Serial.println("Decoding PNG...");
 
   bool drawResult = display.drawPng(
     pngBuffer,
@@ -232,18 +302,127 @@ bool loadAndDrawPng(
 
   free(pngBuffer);
 
-  Serial.print("Free heap after drawing: ");
-  Serial.println(ESP.getFreeHeap());
-
   if (!drawResult)
   {
-    Serial.println("PNG DECODING FAILED");
+    Serial.print("PNG DECODE FAILED: ");
+    Serial.println(path);
+
     return false;
   }
 
-  Serial.println("PNG DRAW SUCCESS");
-
   return true;
+}
+
+// ============================================================
+// DRAW COMPLETE FACE
+//
+// The background is redrawn before every eye change.
+//
+// This is necessary because the transparent PNG from the old
+// eye position would otherwise remain visible underneath the
+// new eye image.
+// ============================================================
+
+bool drawFace()
+{
+  bool success = true;
+
+  display.startWrite();
+
+  // Layer 0: Background
+  success &= loadAndDrawPng(
+    BACKGROUND_PATH,
+    0,
+    0
+  );
+
+  // Layer 1: Mouth
+  success &= loadAndDrawPng(
+    MOUTH_PATH,
+    MOUTH_X,
+    MOUTH_Y
+  );
+
+  // Layer 2: Eyes
+  if (isBlinking)
+  {
+    success &= loadAndDrawPng(
+      EYES_BLINK_PATH,
+      EYES_X,
+      EYES_Y
+    );
+  }
+  else
+  {
+    success &= loadAndDrawPng(
+      EYES_NEUTRAL_PATH,
+      EYES_X,
+      EYES_Y
+    );
+  }
+
+  display.endWrite();
+
+  faceNeedsRedraw = false;
+
+  return success;
+}
+
+// ============================================================
+// BLINK SYSTEM
+// ============================================================
+
+void scheduleNextBlink()
+{
+  nextBlinkAt =
+    millis() +
+    random(
+      BLINK_MIN_INTERVAL_MS,
+      BLINK_MAX_INTERVAL_MS + 1
+    );
+
+  Serial.print("Next blink in ");
+  Serial.print(nextBlinkAt - millis());
+  Serial.println(" ms");
+}
+
+void startBlink()
+{
+  isBlinking = true;
+  blinkStartedAt = millis();
+  faceNeedsRedraw = true;
+
+  Serial.println("Blink closed");
+}
+
+void finishBlink()
+{
+  isBlinking = false;
+  faceNeedsRedraw = true;
+
+  Serial.println("Blink open");
+
+  scheduleNextBlink();
+}
+
+void updateBlink()
+{
+  unsigned long now = millis();
+
+  if (!isBlinking)
+  {
+    if (now >= nextBlinkAt)
+    {
+      startBlink();
+    }
+
+    return;
+  }
+
+  if (now - blinkStartedAt >= BLINK_DURATION_MS)
+  {
+    finishBlink();
+  }
 }
 
 // ============================================================
@@ -253,12 +432,10 @@ bool loadAndDrawPng(
 void setup()
 {
   Serial.begin(115200);
-
-  // Required because early output was previously missed.
   delay(2000);
 
   Serial.println();
-  Serial.println("=== BMO PNG TEST ===");
+  Serial.println("=== BMO BLINK TEST ===");
 
   // ----------------------------------------------------------
   // Initialize display
@@ -314,20 +491,66 @@ void setup()
   Serial.println("SD INITIALIZATION SUCCESS");
 
   // ----------------------------------------------------------
-  // Draw background PNG
+  // Check all required files
   // ----------------------------------------------------------
 
-  if (!loadAndDrawPng(PNG_PATH, 0, 0))
+  bool allFilesFound = true;
+
+  allFilesFound &= fileExists(
+    BACKGROUND_PATH
+  );
+
+  allFilesFound &= fileExists(
+    EYES_NEUTRAL_PATH
+  );
+
+  allFilesFound &= fileExists(
+    EYES_BLINK_PATH
+  );
+
+  allFilesFound &= fileExists(
+    MOUTH_PATH
+  );
+
+  if (!allFilesFound)
   {
     showError(
-      "PNG ERROR",
-      "Could not display default.png."
+      "ASSET ERROR",
+      "One or more PNG files are missing."
     );
 
     return;
   }
 
-  Serial.println("BACKGROUND TEST COMPLETE");
+  Serial.println("All required assets found.");
+
+  // ----------------------------------------------------------
+  // Initialize animation timing
+  // ----------------------------------------------------------
+
+  randomSeed(esp_random());
+
+  scheduleNextBlink();
+
+  // ----------------------------------------------------------
+  // Draw initial BMO face
+  // ----------------------------------------------------------
+
+  Serial.println("Drawing initial face...");
+
+  if (!drawFace())
+  {
+    showError(
+      "RENDER ERROR",
+      "Could not draw BMO face."
+    );
+
+    return;
+  }
+
+  setupComplete = true;
+
+  Serial.println("BMO is alive.");
 }
 
 // ============================================================
@@ -336,5 +559,28 @@ void setup()
 
 void loop()
 {
-  // Nothing required for the static PNG test.
+  if (!setupComplete)
+  {
+    delay(100);
+    return;
+  }
+
+  updateBlink();
+
+  if (faceNeedsRedraw)
+  {
+    if (!drawFace())
+    {
+      setupComplete = false;
+
+      showError(
+        "RENDER ERROR",
+        "Face redraw failed."
+      );
+
+      return;
+    }
+  }
+
+  delay(10);
 }
