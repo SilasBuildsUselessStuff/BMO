@@ -2,17 +2,10 @@
 
 void setup()
 {
-  Serial.begin(115200);
-  Serial.println("PWM TEST");
+  ledcAttach(26, 1000, 8);
+  ledcWrite(26, 5);   // vorher 128
 }
 
 void loop()
 {
-  ledcAttach(26, 1000, 8); // Pin, Frequency, Resolution
-  ledcWrite(26, 128);      // 50% Duty
-
-  while(true)
-  {
-    delay(1000);
-  }
 }
