@@ -1,51 +1,22 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <SD.h>
-
-SPIClass SDSPI(VSPI);
 
 void setup()
 {
   Serial.begin(115200);
-  delay(2000);
-
-  Serial.println("START");
-
-  pinMode(5, OUTPUT);
-  digitalWrite(5, HIGH);
-
-  SDSPI.begin(18, 19, 23);
-  SDSPI.setFrequency(1000000);
-
-  if (!SD.begin(5, SDSPI))
-  {
-    Serial.println("SD FAIL");
-    return;
-  }
-
-  Serial.println("SD OK");
-
-  File root = SD.open("/");
-
-  while (true)
-  {
-    File file = root.openNextFile();
-
-    if (!file)
-      break;
-
-    Serial.print("FILE: ");
-    Serial.print(file.name());
-
-    Serial.print(" SIZE=");
-    Serial.println(file.size());
-
-    file.close();
-  }
-
-  Serial.println("DONE");
+  Serial.println("DAC TEST");
 }
 
 void loop()
 {
+  for (int i = 0; i < 256; i++)
+  {
+    dacWrite(25, i);
+    delayMicroseconds(50);
+  }
+
+  for (int i = 255; i >= 0; i--)
+  {
+    dacWrite(25, i);
+    delayMicroseconds(50);
+  }
 }
