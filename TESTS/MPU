@@ -1,85 +1,153 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <SPI.h>
 #include <SD.h>
+
 #include "AudioFileSourceSD.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
-#include "AudioOutputI2S.h"
+#include "AudioOutputInternalDAC.h"
 
-AudioFileSourceSD *file;
-AudioGeneratorMP3 *mp3;
-AudioFileSourceID3 *id3;
-AudioOutputI2S *out;
+// ============================================================
+// SD card configuration
+// ============================================================
+
+static constexpr int SD_CS = 5;
+static constexpr int SD_SCLK = 18;
+static constexpr int SD_MISO = 19;
+static constexpr int SD_MOSI = 23;
 
 SPIClass SDSPI(VSPI);
+
+// ============================================================
+// Audio objects
+// ============================================================
+
+AudioFileSourceSD* audioFile = nullptr;
+AudioFileSourceID3* id3Source = nullptr;
+AudioGeneratorMP3* mp3Decoder = nullptr;
+AudioOutputInternalDAC* audioOutput = nullptr;
+
+// ============================================================
+// Playback state
+// ============================================================
+
+bool playbackStarted = false;
+bool playbackFinished = false;
+
+// ============================================================
+// Setup
+// ============================================================
 
 void setup()
 {
   Serial.begin(115200);
+  delay(2000);
+
   Serial.println();
+  Serial.println("=== BMO INTERNAL DAC MP3 TEST ===");
 
   WiFi.mode(WIFI_OFF);
-  delay(500);
 
-  Serial.println("Starting...");
+  // ----------------------------------------------------------
+  // Initialize SD card
+  // ----------------------------------------------------------
 
-  pinMode(5, OUTPUT);
-  digitalWrite(5, HIGH);
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
 
-  SDSPI.begin(18, 19, 23);
+  SDSPI.begin(
+    SD_SCLK,
+    SD_MISO,
+    SD_MOSI,
+    SD_CS
+  );
+
   SDSPI.setFrequency(1000000);
 
-  if (!SD.begin(5, SDSPI))
+  if (!SD.begin(SD_CS, SDSPI))
   {
-    Serial.println("SD FAIL");
+    Serial.println("SD initialization failed.");
     return;
   }
 
-  Serial.println("SD OK");
+  Serial.println("SD initialized.");
 
-  File f = SD.open("/test.mp3");
+  // ----------------------------------------------------------
+  // Confirm MP3 file
+  // ----------------------------------------------------------
 
-  if (!f)
+  File testFile = SD.open("/test.mp3");
+
+  if (!testFile)
   {
-    Serial.println("TEST.MP3 NOT FOUND");
+    Serial.println("File not found: /test.mp3");
     return;
   }
 
-  Serial.print("TEST.MP3 FOUND, SIZE=");
-  Serial.println(f.size());
-  f.close();
+  Serial.print("MP3 file found. Size: ");
+  Serial.print(testFile.size());
+  Serial.println(" bytes");
 
-  file = new AudioFileSourceSD("/test.mp3");
-  id3 = new AudioFileSourceID3(file);
+  testFile.close();
 
-  out = new AudioOutputI2S(0, 2, 8, -1);
+  // ----------------------------------------------------------
+  // Create MP3 pipeline
+  // ----------------------------------------------------------
 
-  out->SetOutputModeMono(true);
+  audioFile = new AudioFileSourceSD("/test.mp3");
+  id3Source = new AudioFileSourceID3(audioFile);
 
-  // EXTREM leise
-  out->SetGain(0.01);
+  // This is the important change:
+  // Use the ESP32 internal DAC instead of normal I2S output.
+  audioOutput = new AudioOutputInternalDAC(256);
 
-  mp3 = new AudioGeneratorMP3();
+  // Start extremely quietly.
+  audioOutput->SetGain(0.01);
 
-  Serial.println("Starting MP3...");
+  mp3Decoder = new AudioGeneratorMP3();
 
-  if (!mp3->begin(id3, out))
+  Serial.println("Starting MP3 decoder...");
+
+  playbackStarted = mp3Decoder->begin(
+    id3Source,
+    audioOutput
+  );
+
+  if (!playbackStarted)
   {
-    Serial.println("MP3 START FAILED");
+    Serial.println("MP3 decoder failed to start.");
     return;
   }
 
-  Serial.println("MP3 STARTED");
+  Serial.println("MP3 playback started.");
 }
+
+// ============================================================
+// Main loop
+// ============================================================
 
 void loop()
 {
-  if (mp3 && mp3->isRunning())
+  if (!playbackStarted || playbackFinished)
   {
-    if (!mp3->loop())
+    delay(100);
+    return;
+  }
+
+  if (mp3Decoder->isRunning())
+  {
+    if (!mp3Decoder->loop())
     {
-      Serial.println("MP3 FINISHED OR ERROR");
-      mp3->stop();
+      mp3Decoder->stop();
+      playbackFinished = true;
+
+      Serial.println("MP3 playback finished or stopped.");
     }
+  }
+  else
+  {
+    playbackFinished = true;
+    Serial.println("MP3 playback completed.");
   }
 }
