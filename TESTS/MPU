@@ -1,11 +1,29 @@
-File test = SD.open("/assets/background/default.png");
+#include <SD.h>
 
-if(test)
+void setup()
 {
-  Serial.println("PNG FOUND");
-  Serial.println(test.size());
+  Serial.begin(115200);
+
+  if (!SD.begin(5))
+  {
+    Serial.println("SD FAIL");
+    return;
+  }
+
+  File test = SD.open("/assets/background/default.png");
+
+  if (test)
+  {
+    Serial.println("PNG FOUND");
+    Serial.println(test.size());
+    test.close();
+  }
+  else
+  {
+    Serial.println("PNG NOT FOUND");
+  }
 }
-else
+
+void loop()
 {
-  Serial.println("PNG NOT FOUND");
 }
