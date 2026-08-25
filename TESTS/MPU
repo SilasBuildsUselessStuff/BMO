@@ -128,7 +128,7 @@ Animation bootingAnimation =
   "booting",
   0,
   9,
-  100,
+  350,
   false
 };
 
@@ -138,7 +138,7 @@ Animation idleAnimation =
   "idle",
   0,
   7,
-  180,
+  50,
   true
 };
 
@@ -147,8 +147,8 @@ Animation blinkIdleAnimation =
   "/assets/blinkidle",
   "blinkidle",
   0,
-  7,
-  75,
+  2,
+  50,
   false
 };
 
@@ -300,6 +300,10 @@ bool drawPngFrame(const char* path)
     pngSize
   );
 
+  unsigned long t0 = millis();
+  Serial.print("Read: ");
+  Serial.println(millis() - t0);
+
   pngFile.close();
 
   if (bytesRead != pngSize)
@@ -334,6 +338,9 @@ bool drawPngFrame(const char* path)
     return false;
   }
 
+  Serial.print("Total: ");
+  Serial.println(millis() - t0);
+
   return true;
 }
 
@@ -356,6 +363,14 @@ bool drawCurrentFrame()
 
   Serial.print("Drawing: ");
   Serial.println(framePath);
+
+  unsigned long t0 = millis();
+  bool result = drawPngFrame(framePath);
+
+  Serial.print("Frame render time: ");
+  Serial.println(millis() - t0);
+
+  return result;
 
   return drawPngFrame(framePath);
 }
