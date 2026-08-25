@@ -152,6 +152,16 @@ Animation blinkIdleAnimation =
   false
 };
 
+Animation lookIdleAnimation =
+{
+  "/assets/lookidle",
+  "lookidle",
+  0,
+  20,
+  50,
+  false
+};
+
 // ============================================================
 // CURRENT ANIMATION STATE
 // ============================================================
@@ -160,7 +170,8 @@ enum AnimationMode
 {
   MODE_BOOTING,
   MODE_IDLE,
-  MODE_BLINK_IDLE
+  MODE_BLINK_IDLE,
+  MODE_LOOK_IDLE
 };
 
 AnimationMode currentMode = MODE_BOOTING;
@@ -170,6 +181,7 @@ int frameDirection = 1;
 
 unsigned long lastFrameAt = 0;
 unsigned long nextBlinkAt = 0;
+unsigned long nextLookAt = 0;
 
 bool setupComplete = false;
 
@@ -222,6 +234,9 @@ Animation* getCurrentAnimation()
 
     case MODE_BLINK_IDLE:
       return &blinkIdleAnimation;
+    case MODE_LOOK_IDLE:
+      return &lookIdleAnimation;
+
   }
 
   return &idleAnimation;
@@ -448,6 +463,14 @@ void scheduleNextBlink()
   Serial.println(" ms");
 }
 
+// Look around Schedule
+
+void scheduleNextLook()
+{
+  nextLookAt =
+    millis() + random(10000, 20001);
+}
+
 // ============================================================
 // START ANIMATION MODES
 // ======
@@ -472,6 +495,7 @@ void startIdle()
   lastFrameAt = millis();
 
   scheduleNextBlink();
+  scheduleNextLook();
 
   Serial.println("Animation: IDLE");
 }
@@ -484,6 +508,18 @@ void startBlinkIdle()
   lastFrameAt = millis();
 
   Serial.println("Animation: BLINK IDLE");
+}
+
+// Look
+
+void startLookIdle()
+{
+  currentMode = MODE_LOOK_IDLE;
+  currentFrame = lookIdleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  Serial.println("Animation: LOOK IDLE");
 }
 
 // ============================================================
@@ -509,6 +545,18 @@ void advanceAnimation()
 
   // BlinkIdle plays once, then changes to Idle.
   if (currentMode == MODE_BLINK_IDLE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      startIdle();
+    }
+
+    return;
+  }
+
+  if (currentMode == MODE_LOOK_IDLE)
   {
     currentFrame++;
 
@@ -553,6 +601,27 @@ void updateAnimation()
     now >= nextBlinkAt
   )
   {
+
+    if (
+  currentMode == MODE_IDLE &&
+  now >= nextLookAt
+)
+{
+  startLookIdle();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not draw look frame."
+    );
+  }
+
+  return;
+}
+    
     startBlinkIdle();
 
     if (!drawCurrentFrame())
