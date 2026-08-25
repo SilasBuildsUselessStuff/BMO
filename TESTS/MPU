@@ -21,19 +21,14 @@ class LGFX : public lgfx::LGFX_Device
 public:
   LGFX()
   {
-    // --------------------------------------------------------
     // Display SPI bus
-    // --------------------------------------------------------
-
     {
       auto cfg = bus.config();
 
       cfg.spi_host = HSPI_HOST;
       cfg.spi_mode = 0;
-
       cfg.freq_write = 80000000;
       cfg.freq_read = 40000000;
-
       cfg.spi_3wire = true;
       cfg.use_lock = true;
       cfg.dma_channel = SPI_DMA_CH_AUTO;
@@ -47,10 +42,7 @@ public:
       panel.setBus(&bus);
     }
 
-    // --------------------------------------------------------
     // ST7796 display panel
-    // --------------------------------------------------------
-
     {
       auto cfg = panel.config();
 
@@ -77,10 +69,7 @@ public:
       panel.config(cfg);
     }
 
-    // --------------------------------------------------------
     // Display backlight
-    // --------------------------------------------------------
-
     {
       auto cfg = backlight.config();
 
@@ -116,21 +105,19 @@ static constexpr int SD_MOSI = 23;
 // ============================================================
 // ANIMATION DEFINITIONS
 //
-// highestFrame is inclusive because your numbering starts at 0.
+// highestFrame is inclusive.
 //
-// booting:   0000 through 0009 = 10 frames
-// idle:      0000 through 0007 = 8 frames
-// blinkidle: 0000 through 0007 = 8 frames
+// booting:   0000 through 0009
+// idle:      0000 through 0007
+// blinkidle: 0000 through 0007
 // ============================================================
 
 struct Animation
 {
   const char* folder;
   const char* filePrefix;
-
   int firstFrame;
   int highestFrame;
-
   unsigned long frameDurationMs;
   bool pingPong;
 };
@@ -243,7 +230,7 @@ Animation* getCurrentAnimation()
 // ============================================================
 // BUILD FRAME PATH
 //
-// Example result:
+// Example:
 // /assets/idle/idle0003.png
 // ============================================================
 
@@ -266,16 +253,6 @@ void buildFramePath(
 
 // ============================================================
 // DRAW PNG FRAME FROM SD
-//
-// This uses the same buffer method that successfully displayed
-// your default background PNG.
-//
-// Each frame is:
-// 1. Opened from SD
-// 2. Loaded into RAM
-// 3. Decoded by LovyanGFX
-// 4. Drawn directly to the display
-// 5. Removed from RAM
 // ============================================================
 
 bool drawPngFrame(const char* path)
@@ -286,7 +263,6 @@ bool drawPngFrame(const char* path)
   {
     Serial.print("FRAME NOT FOUND: ");
     Serial.println(path);
-
     return false;
   }
 
@@ -328,4 +304,135 @@ bool drawPngFrame(const char* path)
 
   if (bytesRead != pngSize)
   {
-    
+    Serial.print("FRAME READ INCOMPLETE: ");
+    Serial.println(path);
+
+    Serial.print("Expected bytes: ");
+    Serial.println(pngSize);
+
+    Serial.print("Read bytes: ");
+    Serial.println(bytesRead);
+
+    free(pngBuffer);
+    return false;
+  }
+
+  bool drawResult = display.drawPng(
+    pngBuffer,
+    pngSize,
+    0,
+    0
+  );
+
+  free(pngBuffer);
+
+  if (!drawResult)
+  {
+    Serial.print("FRAME DECODE FAILED: ");
+    Serial.println(path);
+
+    return false;
+  }
+
+  return true;
+}
+
+// ============================================================
+// DRAW CURRENT FRAME
+// ============================================================
+
+bool drawCurrentFrame()
+{
+  Animation* animation = getCurrentAnimation();
+
+  char framePath[96];
+
+  buildFramePath(
+    *animation,
+    currentFrame,
+    framePath,
+    sizeof(framePath)
+  );
+
+  Serial.print("Drawing: ");
+  Serial.println(framePath);
+
+  return drawPngFrame(framePath);
+}
+
+// ============================================================
+// VERIFY ANIMATION FILES
+//
+// Checks the first and last frame of each required animation.
+// ============================================================
+
+bool verifyAnimation(const Animation& animation)
+{
+  char firstPath[96];
+  char lastPath[96];
+
+  buildFramePath(
+    animation,
+    animation.firstFrame,
+    firstPath,
+    sizeof(firstPath)
+  );
+
+  buildFramePath(
+    animation,
+    animation.highestFrame,
+    lastPath,
+    sizeof(lastPath)
+  );
+
+  File firstFile = SD.open(firstPath, FILE_READ);
+
+  if (!firstFile)
+  {
+    Serial.print("FIRST FRAME MISSING: ");
+    Serial.println(firstPath);
+    return false;
+  }
+
+  firstFile.close();
+
+  File lastFile = SD.open(lastPath, FILE_READ);
+
+  if (!lastFile)
+  {
+    Serial.print("LAST FRAME MISSING: ");
+    Serial.println(lastPath);
+    return false;
+  }
+
+  lastFile.close();
+
+  Serial.print("Animation verified: ");
+  Serial.print(animation.filePrefix);
+
+  Serial.print(" | Frames ");
+  Serial.print(animation.firstFrame);
+
+  Serial.print(" to ");
+  Serial.println(animation.highestFrame);
+
+  return true;
+}
+
+// ============================================================
+// BLINK SCHEDULING
+// ============================================================
+
+void scheduleNextBlink()
+{
+  nextBlinkAt =
+    millis() + random(5000, 10001);
+
+  Serial.print("Next blink in ");
+  Serial.print(nextBlinkAt - millis());
+  Serial.println(" ms");
+}
+
+// ============================================================
+// START ANIMATION MODES
+// ======
