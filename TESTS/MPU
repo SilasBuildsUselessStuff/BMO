@@ -436,3 +436,276 @@ void scheduleNextBlink()
 // ============================================================
 // START ANIMATION MODES
 // ======
+
+// ============================================================
+
+void startBooting()
+{
+  currentMode = MODE_BOOTING;
+  currentFrame = bootingAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  Serial.println("Animation: BOOTING");
+}
+
+void startIdle()
+{
+  currentMode = MODE_IDLE;
+  currentFrame = idleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  scheduleNextBlink();
+
+  Serial.println("Animation: IDLE");
+}
+
+void startBlinkIdle()
+{
+  currentMode = MODE_BLINK_IDLE;
+  currentFrame = blinkIdleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  Serial.println("Animation: BLINK IDLE");
+}
+
+// ============================================================
+// ADVANCE CURRENT ANIMATION
+// ============================================================
+
+void advanceAnimation()
+{
+  Animation* animation = getCurrentAnimation();
+
+  // Booting plays once, then changes to Idle.
+  if (currentMode == MODE_BOOTING)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      startIdle();
+    }
+
+    return;
+  }
+
+  // BlinkIdle plays once, then changes to Idle.
+  if (currentMode == MODE_BLINK_IDLE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      startIdle();
+    }
+
+    return;
+  }
+
+  // Idle runs as a ping-pong loop:
+  // 0000 -> 0001 -> ... -> 0007 -> 0006 -> ... -> 0000
+  if (currentMode == MODE_IDLE)
+  {
+    currentFrame += frameDirection;
+
+    if (currentFrame >= animation->highestFrame)
+    {
+      currentFrame = animation->highestFrame;
+      frameDirection = -1;
+    }
+    else if (currentFrame <= animation->firstFrame)
+    {
+      currentFrame = animation->firstFrame;
+      frameDirection = 1;
+    }
+  }
+}
+
+// ============================================================
+// UPDATE ANIMATION PLAYER
+// ============================================================
+
+void updateAnimation()
+{
+  unsigned long now = millis();
+
+  // Trigger a random blink while Idle is active.
+  if (
+    currentMode == MODE_IDLE &&
+    now >= nextBlinkAt
+  )
+  {
+    startBlinkIdle();
+
+    if (!drawCurrentFrame())
+    {
+      setupComplete = false;
+
+      showError(
+        "FRAME ERROR",
+        "Could not draw blink frame."
+      );
+    }
+
+    return;
+  }
+
+  Animation* animation = getCurrentAnimation();
+
+  if (
+    now - lastFrameAt <
+    animation->frameDurationMs
+  )
+  {
+    return;
+  }
+
+  lastFrameAt = now;
+
+  advanceAnimation();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not draw animation frame."
+    );
+  }
+}
+
+// ============================================================
+// SETUP
+// ============================================================
+
+void setup()
+{
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println();
+  Serial.println("=== BMO FRAME ANIMATION TEST ===");
+
+  // ----------------------------------------------------------
+  // Initialize display
+  // ----------------------------------------------------------
+
+  display.init();
+  display.setRotation(1);
+  display.setBrightness(180);
+  display.setColorDepth(16);
+  display.setSwapBytes(true);
+
+  display.fillScreen(
+    display.color565(0, 0, 0)
+  );
+
+  Serial.print("Display size: ");
+  Serial.print(display.width());
+  Serial.print(" x ");
+  Serial.println(display.height());
+
+  // ----------------------------------------------------------
+  // Initialize SD card
+  // ----------------------------------------------------------
+
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  SDSPI.begin(
+    SD_SCLK,
+    SD_MISO,
+    SD_MOSI,
+    SD_CS
+  );
+
+  SDSPI.setFrequency(1000000);
+
+  if (!SD.begin(SD_CS, SDSPI))
+  {
+    Serial.println("SD INITIALIZATION FAILED");
+
+    showError(
+      "SD ERROR",
+      "Could not initialize SD card."
+    );
+
+    return;
+  }
+
+  Serial.println("SD initialized.");
+
+  // ----------------------------------------------------------
+  // Verify required animations
+  // ----------------------------------------------------------
+
+  bool animationsValid = true;
+
+  animationsValid &=
+    verifyAnimation(bootingAnimation);
+
+  animationsValid &=
+    verifyAnimation(idleAnimation);
+
+  animationsValid &=
+    verifyAnimation(blinkIdleAnimation);
+
+  if (!animationsValid)
+  {
+    showError(
+      "ASSET ERROR",
+      "Animation frames are missing."
+    );
+
+    return;
+  }
+
+  Serial.println("All required animations verified.");
+
+  // ----------------------------------------------------------
+  // Initialize randomness
+  // ----------------------------------------------------------
+
+  randomSeed(esp_random());
+
+  // ----------------------------------------------------------
+  // Start boot animation
+  // ----------------------------------------------------------
+
+  startBooting();
+
+  if (!drawCurrentFrame())
+  {
+    showError(
+      "FRAME ERROR",
+      "Could not draw first boot frame."
+    );
+
+    return;
+  }
+
+  setupComplete = true;
+
+  Serial.println("BMO animation player running.");
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+
+void loop()
+{
+  if (!setupComplete)
+  {
+    delay(100);
+    return;
+  }
+
+  updateAnimation();
+
+  delay(1);
+}
