@@ -4,6 +4,7 @@
 #include <LovyanGFX.hpp>
 #include <SPI.h>
 #include <SD.h>
+#include <driver/i2c.h>
 
 // ============================================================
 // DISPLAY CONFIGURATION
@@ -17,6 +18,7 @@ class LGFX : public lgfx::LGFX_Device
   lgfx::Panel_ST7796 panel;
   lgfx::Bus_SPI bus;
   lgfx::Light_PWM backlight;
+  lgfx::Touch_GT911 touch;
 
 public:
   LGFX()
@@ -82,6 +84,30 @@ public:
       panel.setLight(&backlight);
     }
 
+    // Capacitive touch controller
+{
+  auto cfg = touch.config();
+
+  cfg.pin_int = GPIO_NUM_36;
+  cfg.pin_sda = GPIO_NUM_33;
+  cfg.pin_scl = GPIO_NUM_32;
+
+  cfg.i2c_addr = 0x5D;
+  cfg.i2c_port = I2C_NUM_0;
+  cfg.freq = 800000;
+
+  cfg.x_min = 14;
+  cfg.x_max = 310;
+  cfg.y_min = 5;
+  cfg.y_max = 448;
+
+  cfg.offset_rotation = 0;
+  cfg.bus_shared = false;
+
+  touch.config(cfg);
+  panel.setTouch(&touch);
+}
+
     setPanel(&panel);
   }
 };
@@ -103,13 +129,10 @@ static constexpr int SD_MISO = 19;
 static constexpr int SD_MOSI = 23;
 
 // ============================================================
+// ============================================================
 // ANIMATION DEFINITIONS
 //
-// highestFrame is inclusive.
-//
-// booting:   0000 through 0009
-// idle:      0000 through 0007
-// blinkidle: 0000 through 0007
+// highestFrame is inclusive because numbering begins at 0000.
 // ============================================================
 
 struct Animation
@@ -162,27 +185,129 @@ Animation lookIdleAnimation =
   false
 };
 
+Animation surprisedAnimation =
+{
+  "/assets/surprised",
+  "surprised",
+  0,
+  8,
+  50,
+  false
+};
+
+Animation smileAnimation =
+{
+  "/assets/smile",
+  "smile",
+  0,
+  9,
+  50,
+  true
+};
+
+Animation blinkSmileAnimation =
+{
+  "/assets/blinksmile",
+  "blinksmile",
+  0,
+  9,
+  50,
+  false
+};
+
+Animation lookSmileAnimation =
+{
+  "/assets/looksmile",
+  "looksmile",
+  0,
+  20,
+  50,
+  false
+};
+
+Animation tiredAnimation =
+{
+  "/assets/tired",
+  "tired",
+  0,
+  9,
+  100,
+  true
+};
+
+Animation sleepingAnimation =
+{
+  "/assets/sleeping",
+  "sleeping",
+  0,
+  17,
+  120,
+  true
+};
+
 // ============================================================
-// CURRENT ANIMATION STATE
+// BEHAVIOR TIMINGS
+// ============================================================
+
+static constexpr unsigned long SMILE_DURATION_MS =
+  60000UL;
+
+static constexpr unsigned long IDLE_TO_TIRED_MS =
+  120000UL;
+
+static constexpr unsigned long TIRED_TO_SLEEPING_MS =
+  60000UL;
+
+static constexpr unsigned long TOUCH_DEBOUNCE_MS =
+  250UL;
+
+// ============================================================
+// ANIMATION MODES
 // ============================================================
 
 enum AnimationMode
 {
   MODE_BOOTING,
+
   MODE_IDLE,
   MODE_BLINK_IDLE,
-  MODE_LOOK_IDLE
+  MODE_LOOK_IDLE,
+
+  MODE_SURPRISED,
+
+  MODE_SMILE,
+  MODE_BLINK_SMILE,
+  MODE_LOOK_SMILE,
+
+  MODE_TIRED,
+  MODE_SLEEPING
 };
 
 AnimationMode currentMode = MODE_BOOTING;
+
+// ============================================================
+// FRAME STATE
+// ============================================================
 
 int currentFrame = 0;
 int frameDirection = 1;
 
 unsigned long lastFrameAt = 0;
+
+// ============================================================
+// EVENT TIMERS
+// ============================================================
+
 unsigned long nextBlinkAt = 0;
 unsigned long nextLookAt = 0;
 
+unsigned long smileUntil = 0;
+unsigned long lastInteractionAt = 0;
+unsigned long tiredStartedAt = 0;
+
+unsigned long lastTouchAt = 0;
+
+bool previousTouchState = false;
 bool setupComplete = false;
 
 // ============================================================
@@ -234,9 +359,27 @@ Animation* getCurrentAnimation()
 
     case MODE_BLINK_IDLE:
       return &blinkIdleAnimation;
+
     case MODE_LOOK_IDLE:
       return &lookIdleAnimation;
 
+    case MODE_SURPRISED:
+      return &surprisedAnimation;
+
+    case MODE_SMILE:
+      return &smileAnimation;
+
+    case MODE_BLINK_SMILE:
+      return &blinkSmileAnimation;
+
+    case MODE_LOOK_SMILE:
+      return &lookSmileAnimation;
+
+    case MODE_TIRED:
+      return &tiredAnimation;
+
+    case MODE_SLEEPING:
+      return &sleepingAnimation;
   }
 
   return &idleAnimation;
@@ -315,22 +458,12 @@ bool drawPngFrame(const char* path)
     pngSize
   );
 
-  unsigned long t0 = millis();
-  Serial.print("Read: ");
-  Serial.println(millis() - t0);
-
   pngFile.close();
 
   if (bytesRead != pngSize)
   {
     Serial.print("FRAME READ INCOMPLETE: ");
     Serial.println(path);
-
-    Serial.print("Expected bytes: ");
-    Serial.println(pngSize);
-
-    Serial.print("Read bytes: ");
-    Serial.println(bytesRead);
 
     free(pngBuffer);
     return false;
@@ -352,9 +485,6 @@ bool drawPngFrame(const char* path)
 
     return false;
   }
-
-  Serial.print("Total: ");
-  Serial.println(millis() - t0);
 
   return true;
 }
@@ -379,21 +509,11 @@ bool drawCurrentFrame()
   Serial.print("Drawing: ");
   Serial.println(framePath);
 
-  unsigned long t0 = millis();
-  bool result = drawPngFrame(framePath);
-
-  Serial.print("Frame render time: ");
-  Serial.println(millis() - t0);
-
-  return result;
-
   return drawPngFrame(framePath);
 }
 
 // ============================================================
-// VERIFY ANIMATION FILES
-//
-// Checks the first and last frame of each required animation.
+// VERIFY ANIMATION
 // ============================================================
 
 bool verifyAnimation(const Animation& animation)
@@ -439,10 +559,8 @@ bool verifyAnimation(const Animation& animation)
 
   Serial.print("Animation verified: ");
   Serial.print(animation.filePrefix);
-
   Serial.print(" | Frames ");
   Serial.print(animation.firstFrame);
-
   Serial.print(" to ");
   Serial.println(animation.highestFrame);
 
@@ -450,20 +568,14 @@ bool verifyAnimation(const Animation& animation)
 }
 
 // ============================================================
-// BLINK SCHEDULING
+// EVENT SCHEDULING
 // ============================================================
 
 void scheduleNextBlink()
 {
   nextBlinkAt =
     millis() + random(5000, 10001);
-
-  Serial.print("Next blink in ");
-  Serial.print(nextBlinkAt - millis());
-  Serial.println(" ms");
 }
-
-// Look around Schedule
 
 void scheduleNextLook()
 {
@@ -471,10 +583,34 @@ void scheduleNextLook()
     millis() + random(10000, 20001);
 }
 
-// ============================================================
-// START ANIMATION MODES
-// ======
+void scheduleIdleEventsIfNeeded()
+{
+  if (nextBlinkAt == 0)
+  {
+    scheduleNextBlink();
+  }
 
+  if (nextLookAt == 0)
+  {
+    scheduleNextLook();
+  }
+}
+
+void scheduleSmileEventsIfNeeded()
+{
+  if (nextBlinkAt == 0)
+  {
+    scheduleNextBlink();
+  }
+
+  if (nextLookAt == 0)
+  {
+    scheduleNextLook();
+  }
+}
+
+// ============================================================
+// START AND RESUME MODES
 // ============================================================
 
 void startBooting()
@@ -487,15 +623,29 @@ void startBooting()
   Serial.println("Animation: BOOTING");
 }
 
-void startIdle()
+void startFreshIdle()
 {
   currentMode = MODE_IDLE;
   currentFrame = idleAnimation.firstFrame;
   frameDirection = 1;
   lastFrameAt = millis();
 
-  scheduleNextBlink();
-  scheduleNextLook();
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  scheduleIdleEventsIfNeeded();
+
+  Serial.println("Animation: IDLE");
+}
+
+void resumeIdle()
+{
+  currentMode = MODE_IDLE;
+  currentFrame = idleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  scheduleIdleEventsIfNeeded();
 
   Serial.println("Animation: IDLE");
 }
@@ -507,10 +657,10 @@ void startBlinkIdle()
   frameDirection = 1;
   lastFrameAt = millis();
 
+  nextBlinkAt = 0;
+
   Serial.println("Animation: BLINK IDLE");
 }
-
-// Look
 
 void startLookIdle()
 {
@@ -519,7 +669,180 @@ void startLookIdle()
   frameDirection = 1;
   lastFrameAt = millis();
 
+  nextLookAt = 0;
+
   Serial.println("Animation: LOOK IDLE");
+}
+
+void startSurprised()
+{
+  currentMode = MODE_SURPRISED;
+  currentFrame = surprisedAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  Serial.println("Animation: SURPRISED");
+}
+
+void startSmileSession()
+{
+  currentMode = MODE_SMILE;
+  currentFrame = smileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  smileUntil = millis() + SMILE_DURATION_MS;
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  scheduleSmileEventsIfNeeded();
+
+  Serial.println("Animation: SMILE");
+}
+
+void resumeSmile()
+{
+  currentMode = MODE_SMILE;
+  currentFrame = smileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  scheduleSmileEventsIfNeeded();
+
+  Serial.println("Animation: SMILE");
+}
+
+void startBlinkSmile()
+{
+  currentMode = MODE_BLINK_SMILE;
+  currentFrame = blinkSmileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+
+  Serial.println("Animation: BLINK SMILE");
+}
+
+void startLookSmile()
+{
+  currentMode = MODE_LOOK_SMILE;
+  currentFrame = lookSmileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextLookAt = 0;
+
+  Serial.println("Animation: LOOK SMILE");
+}
+
+void startTired()
+{
+  currentMode = MODE_TIRED;
+  currentFrame = tiredAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  tiredStartedAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  Serial.println("Animation: TIRED");
+}
+
+void startSleeping()
+{
+  currentMode = MODE_SLEEPING;
+  currentFrame = sleepingAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  Serial.println("Animation: SLEEPING");
+}
+
+// ============================================================
+// TOUCH HANDLING
+// ============================================================
+
+void handleTouch()
+{
+  uint16_t touchX = 0;
+  uint16_t touchY = 0;
+
+  bool touched = display.getTouch(
+    &touchX,
+    &touchY
+  );
+
+  unsigned long now = millis();
+
+  bool newTouch =
+    touched &&
+    !previousTouchState &&
+    now - lastTouchAt >= TOUCH_DEBOUNCE_MS;
+
+  previousTouchState = touched;
+
+  if (!newTouch)
+  {
+    return;
+  }
+
+  lastTouchAt = now;
+  lastInteractionAt = now;
+
+  Serial.print("Touch: ");
+  Serial.print(touchX);
+  Serial.print(", ");
+  Serial.println(touchY);
+
+  // Ignore Touch during booting.
+  if (currentMode == MODE_BOOTING)
+  {
+    return;
+  }
+
+  startSurprised();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not draw surprise frame."
+    );
+  }
+}
+
+// ============================================================
+// LOOPING ANIMATION HELPER
+// ============================================================
+
+void advanceLoopingAnimation(
+  Animation* animation
+)
+{
+  currentFrame += frameDirection;
+
+  if (currentFrame >= animation->highestFrame)
+  {
+    currentFrame = animation->highestFrame;
+    frameDirection = -1;
+  }
+  else if (currentFrame <= animation->firstFrame)
+  {
+    currentFrame = animation->firstFrame;
+    frameDirection = 1;
+  }
 }
 
 // ============================================================
@@ -530,27 +853,34 @@ void advanceAnimation()
 {
   Animation* animation = getCurrentAnimation();
 
-  // Booting plays once, then changes to Idle.
+  // ----------------------------------------------------------
+  // Booting plays once.
+  // ----------------------------------------------------------
+
   if (currentMode == MODE_BOOTING)
   {
     currentFrame++;
 
     if (currentFrame > animation->highestFrame)
     {
-      startIdle();
+      lastInteractionAt = millis();
+      startFreshIdle();
     }
 
     return;
   }
 
-  // BlinkIdle plays once, then changes to Idle.
+  // ----------------------------------------------------------
+  // Idle event animations play once.
+  // ----------------------------------------------------------
+
   if (currentMode == MODE_BLINK_IDLE)
   {
     currentFrame++;
 
     if (currentFrame > animation->highestFrame)
     {
-      startIdle();
+      resumeIdle();
     }
 
     return;
@@ -562,27 +892,198 @@ void advanceAnimation()
 
     if (currentFrame > animation->highestFrame)
     {
-      startIdle();
+      resumeIdle();
     }
 
     return;
   }
 
-  // Idle runs as a ping-pong loop:
-  // 0000 -> 0001 -> ... -> 0007 -> 0006 -> ... -> 0000
+  // ----------------------------------------------------------
+  // Surprise plays once, then starts the Smile session.
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_SURPRISED)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      startSmileSession();
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Smile event animations play once.
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_BLINK_SMILE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      resumeSmile();
+    }
+
+    return;
+  }
+
+  if (currentMode == MODE_LOOK_SMILE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      resumeSmile();
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Permanent looping states.
+  // ----------------------------------------------------------
+
+  if (
+    currentMode == MODE_IDLE ||
+    currentMode == MODE_SMILE ||
+    currentMode == MODE_TIRED ||
+    currentMode == MODE_SLEEPING
+  )
+  {
+    advanceLoopingAnimation(animation);
+  }
+}
+
+// ============================================================
+// TIMED BEHAVIOR
+// ============================================================
+
+void updateBehaviorTimers()
+{
+  unsigned long now = millis();
+
+  // Smile remains active for one minute after Touch.
+  if (
+    currentMode == MODE_SMILE &&
+    now >= smileUntil
+  )
+  {
+    Serial.println("Smile session finished.");
+    startFreshIdle();
+    return;
+  }
+
+  // Two minutes without Touch causes Tired.
+  if (
+    currentMode == MODE_IDLE &&
+    now - lastInteractionAt >= IDLE_TO_TIRED_MS
+  )
+  {
+    startTired();
+    return;
+  }
+
+  // One minute in Tired causes Sleeping.
+  if (
+    currentMode == MODE_TIRED &&
+    now - tiredStartedAt >= TIRED_TO_SLEEPING_MS
+  )
+  {
+    startSleeping();
+    return;
+  }
+}
+
+// ============================================================
+// RANDOM IDLE AND SMILE EVENTS
+// ============================================================
+
+void updateRandomEvents()
+{
+  unsigned long now = millis();
+
+  // ----------------------------------------------------------
+  // Idle events
+  // ----------------------------------------------------------
+
   if (currentMode == MODE_IDLE)
   {
-    currentFrame += frameDirection;
+    if (now >= nextLookAt)
+    {
+      startLookIdle();
 
-    if (currentFrame >= animation->highestFrame)
-    {
-      currentFrame = animation->highestFrame;
-      frameDirection = -1;
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw look frame."
+        );
+      }
+
+      return;
     }
-    else if (currentFrame <= animation->firstFrame)
+
+    if (now >= nextBlinkAt)
     {
-      currentFrame = animation->firstFrame;
-      frameDirection = 1;
+      startBlinkIdle();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw blink frame."
+        );
+      }
+
+      return;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Smile events
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_SMILE)
+  {
+    if (now >= nextLookAt)
+    {
+      startLookSmile();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw smile look frame."
+        );
+      }
+
+      return;
+    }
+
+    if (now >= nextBlinkAt)
+    {
+      startBlinkSmile();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw smile blink frame."
+        );
+      }
+
+      return;
     }
   }
 }
@@ -594,50 +1095,6 @@ void advanceAnimation()
 void updateAnimation()
 {
   unsigned long now = millis();
-
-  // LOOK EVENT
-
-  if (
-    currentMode == MODE_IDLE &&
-    now >= nextLookAt
-  )
-  {
-    startLookIdle();
-
-    if (!drawCurrentFrame())
-    {
-      setupComplete = false;
-
-      showError(
-        "FRAME ERROR",
-        "Could not draw look frame."
-      );
-    }
-
-    return;
-  }
-
-  // BLINK EVENT
-
-  if (
-    currentMode == MODE_IDLE &&
-    now >= nextBlinkAt
-  )
-  {
-    startBlinkIdle();
-
-    if (!drawCurrentFrame())
-    {
-      setupComplete = false;
-
-      showError(
-        "FRAME ERROR",
-        "Could not draw blink frame."
-      );
-    }
-
-    return;
-  }
 
   Animation* animation = getCurrentAnimation();
 
@@ -674,7 +1131,7 @@ void setup()
   delay(2000);
 
   Serial.println();
-  Serial.println("=== BMO FRAME ANIMATION TEST ===");
+  Serial.println("=== BMO BEHAVIOR TEST ===");
 
   // ----------------------------------------------------------
   // Initialize display
@@ -726,7 +1183,7 @@ void setup()
   Serial.println("SD initialized.");
 
   // ----------------------------------------------------------
-  // Verify required animations
+  // Verify all animations
   // ----------------------------------------------------------
 
   bool animationsValid = true;
@@ -740,6 +1197,27 @@ void setup()
   animationsValid &=
     verifyAnimation(blinkIdleAnimation);
 
+  animationsValid &=
+    verifyAnimation(lookIdleAnimation);
+
+  animationsValid &=
+    verifyAnimation(surprisedAnimation);
+
+  animationsValid &=
+    verifyAnimation(smileAnimation);
+
+  animationsValid &=
+    verifyAnimation(blinkSmileAnimation);
+
+  animationsValid &=
+    verifyAnimation(lookSmileAnimation);
+
+  animationsValid &=
+    verifyAnimation(tiredAnimation);
+
+  animationsValid &=
+    verifyAnimation(sleepingAnimation);
+
   if (!animationsValid)
   {
     showError(
@@ -750,17 +1228,15 @@ void setup()
     return;
   }
 
-  Serial.println("All required animations verified.");
+  Serial.println("All animations verified.");
 
   // ----------------------------------------------------------
-  // Initialize randomness
+  // Initialize behavior
   // ----------------------------------------------------------
 
   randomSeed(esp_random());
 
-  // ----------------------------------------------------------
-  // Start boot animation
-  // ----------------------------------------------------------
+  lastInteractionAt = millis();
 
   startBooting();
 
@@ -776,7 +1252,7 @@ void setup()
 
   setupComplete = true;
 
-  Serial.println("BMO animation player running.");
+  Serial.println("BMO behavior system running.");
 }
 
 // ============================================================
@@ -790,6 +1266,12 @@ void loop()
     delay(100);
     return;
   }
+
+  handleTouch();
+
+  updateBehaviorTimers();
+
+  updateRandomEvents();
 
   updateAnimation();
 
