@@ -1,25 +1,331 @@
-LGFX_Sprite eyeSprite(&display);
+#define LGFX_USE_V1
 
-eyeSprite.setColorDepth(16);
+#include <Arduino.h>
+#include <LovyanGFX.hpp>
+#include <SPI.h>
+#include <SD.h>
 
-if (!eyeSprite.createSprite(480, 160))
+// ============================================================
+// DISPLAY CONFIGURATION
+// Board: ESP32-3248S035C
+// Display: ST7796
+// Landscape resolution: 480 x 320
+// ============================================================
+
+class LGFX : public lgfx::LGFX_Device
 {
-  Serial.println("EYE SPRITE FAILED");
-  return;
+  lgfx::Panel_ST7796 panel;
+  lgfx::Bus_SPI bus;
+  lgfx::Light_PWM backlight;
+
+public:
+  LGFX()
+  {
+    // --------------------------------------------------------
+    // Display SPI bus
+    // --------------------------------------------------------
+
+    {
+      auto cfg = bus.config();
+
+      cfg.spi_host = HSPI_HOST;
+      cfg.spi_mode = 0;
+
+      cfg.freq_write = 80000000;
+      cfg.freq_read = 40000000;
+
+      cfg.spi_3wire = true;
+      cfg.use_lock = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
+
+      cfg.pin_sclk = 14;
+      cfg.pin_mosi = 13;
+      cfg.pin_miso = 12;
+      cfg.pin_dc = 2;
+
+      bus.config(cfg);
+      panel.setBus(&bus);
+    }
+
+    // --------------------------------------------------------
+    // ST7796 display panel
+    // --------------------------------------------------------
+
+    {
+      auto cfg = panel.config();
+
+      cfg.pin_cs = 15;
+      cfg.pin_rst = -1;
+      cfg.pin_busy = -1;
+
+      cfg.panel_width = 320;
+      cfg.panel_height = 480;
+
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
+
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits = 1;
+
+      cfg.readable = true;
+      cfg.invert = false;
+      cfg.rgb_order = false;
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = true;
+
+      panel.config(cfg);
+    }
+
+    // --------------------------------------------------------
+    // Display backlight
+    // --------------------------------------------------------
+
+    {
+      auto cfg = backlight.config();
+
+      cfg.pin_bl = 27;
+      cfg.invert = false;
+      cfg.freq = 1200;
+      cfg.pwm_channel = 7;
+
+      backlight.config(cfg);
+      panel.setLight(&backlight);
+    }
+
+    setPanel(&panel);
+  }
+};
+
+// ============================================================
+// HARDWARE OBJECTS
+// ============================================================
+
+LGFX display;
+SPIClass SDSPI(VSPI);
+
+// ============================================================
+// SD CARD CONFIGURATION
+// ============================================================
+
+static constexpr int SD_CS = 5;
+static constexpr int SD_SCLK = 18;
+static constexpr int SD_MISO = 19;
+static constexpr int SD_MOSI = 23;
+
+// ============================================================
+// ANIMATION DEFINITIONS
+//
+// highestFrame is inclusive because your numbering starts at 0.
+//
+// booting:   0000 through 0009 = 10 frames
+// idle:      0000 through 0007 = 8 frames
+// blinkidle: 0000 through 0007 = 8 frames
+// ============================================================
+
+struct Animation
+{
+  const char* folder;
+  const char* filePrefix;
+
+  int firstFrame;
+  int highestFrame;
+
+  unsigned long frameDurationMs;
+  bool pingPong;
+};
+
+Animation bootingAnimation =
+{
+  "/assets/booting",
+  "booting",
+  0,
+  9,
+  100,
+  false
+};
+
+Animation idleAnimation =
+{
+  "/assets/idle",
+  "idle",
+  0,
+  7,
+  180,
+  true
+};
+
+Animation blinkIdleAnimation =
+{
+  "/assets/blinkidle",
+  "blinkidle",
+  0,
+  7,
+  75,
+  false
+};
+
+// ============================================================
+// CURRENT ANIMATION STATE
+// ============================================================
+
+enum AnimationMode
+{
+  MODE_BOOTING,
+  MODE_IDLE,
+  MODE_BLINK_IDLE
+};
+
+AnimationMode currentMode = MODE_BOOTING;
+
+int currentFrame = 0;
+int frameDirection = 1;
+
+unsigned long lastFrameAt = 0;
+unsigned long nextBlinkAt = 0;
+
+bool setupComplete = false;
+
+// ============================================================
+// ERROR SCREEN
+// ============================================================
+
+void showError(
+  const char* title,
+  const char* message
+)
+{
+  display.fillScreen(
+    display.color565(20, 20, 20)
+  );
+
+  display.setTextSize(2);
+
+  display.setTextColor(
+    display.color565(255, 80, 80)
+  );
+
+  display.setCursor(20, 30);
+  display.println(title);
+
+  display.setTextColor(
+    display.color565(255, 255, 255)
+  );
+
+  display.setCursor(20, 75);
+  display.println(message);
+
+  display.setCursor(20, 120);
+  display.println("Check Serial Monitor.");
 }
 
-eyeSprite.fillSprite(TFT_BLACK);
+// ============================================================
+// GET CURRENT ANIMATION
+// ============================================================
 
-drawAssetToFrame(
-  neutralEyesAsset,
-  0,
-  0
-);
+Animation* getCurrentAnimation()
+{
+  switch (currentMode)
+  {
+    case MODE_BOOTING:
+      return &bootingAnimation;
 
-eyeSprite.pushSprite(
-  0,
-  20,
-  TFT_BLACK
-);
+    case MODE_IDLE:
+      return &idleAnimation;
 
-eyeSprite.deleteSprite();
+    case MODE_BLINK_IDLE:
+      return &blinkIdleAnimation;
+  }
+
+  return &idleAnimation;
+}
+
+// ============================================================
+// BUILD FRAME PATH
+//
+// Example result:
+// /assets/idle/idle0003.png
+// ============================================================
+
+void buildFramePath(
+  const Animation& animation,
+  int frameNumber,
+  char* outputPath,
+  size_t outputPathSize
+)
+{
+  snprintf(
+    outputPath,
+    outputPathSize,
+    "%s/%s%04d.png",
+    animation.folder,
+    animation.filePrefix,
+    frameNumber
+  );
+}
+
+// ============================================================
+// DRAW PNG FRAME FROM SD
+//
+// This uses the same buffer method that successfully displayed
+// your default background PNG.
+//
+// Each frame is:
+// 1. Opened from SD
+// 2. Loaded into RAM
+// 3. Decoded by LovyanGFX
+// 4. Drawn directly to the display
+// 5. Removed from RAM
+// ============================================================
+
+bool drawPngFrame(const char* path)
+{
+  File pngFile = SD.open(path, FILE_READ);
+
+  if (!pngFile)
+  {
+    Serial.print("FRAME NOT FOUND: ");
+    Serial.println(path);
+
+    return false;
+  }
+
+  size_t pngSize = pngFile.size();
+
+  if (pngSize == 0)
+  {
+    Serial.print("FRAME IS EMPTY: ");
+    Serial.println(path);
+
+    pngFile.close();
+    return false;
+  }
+
+  uint8_t* pngBuffer =
+    static_cast<uint8_t*>(malloc(pngSize));
+
+  if (pngBuffer == nullptr)
+  {
+    Serial.print("FRAME MEMORY FAILED: ");
+    Serial.println(path);
+
+    Serial.print("Required bytes: ");
+    Serial.println(pngSize);
+
+    Serial.print("Free heap: ");
+    Serial.println(ESP.getFreeHeap());
+
+    pngFile.close();
+    return false;
+  }
+
+  size_t bytesRead = pngFile.read(
+    pngBuffer,
+    pngSize
+  );
+
+  pngFile.close();
+
+  if (bytesRead != pngSize)
+  {
+    
