@@ -595,33 +595,35 @@ void updateAnimation()
 {
   unsigned long now = millis();
 
-  // Trigger a random blink while Idle is active.
+  // LOOK EVENT
+
+  if (
+    currentMode == MODE_IDLE &&
+    now >= nextLookAt
+  )
+  {
+    startLookIdle();
+
+    if (!drawCurrentFrame())
+    {
+      setupComplete = false;
+
+      showError(
+        "FRAME ERROR",
+        "Could not draw look frame."
+      );
+    }
+
+    return;
+  }
+
+  // BLINK EVENT
+
   if (
     currentMode == MODE_IDLE &&
     now >= nextBlinkAt
   )
   {
-
-    if (
-  currentMode == MODE_IDLE &&
-  now >= nextLookAt
-)
-{
-  startLookIdle();
-
-  if (!drawCurrentFrame())
-  {
-    setupComplete = false;
-
-    showError(
-      "FRAME ERROR",
-      "Could not draw look frame."
-    );
-  }
-
-  return;
-}
-    
     startBlinkIdle();
 
     if (!drawCurrentFrame())
