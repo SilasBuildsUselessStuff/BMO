@@ -227,3 +227,5 @@ class BMOConnection:
 
 
 // .\.venv\Scripts\python.exe -c "from communication.serial import BMOConnection; print('Serial module loaded successfully')"
+// .\.venv\Scripts\python.exe -c "import time; from communication.serial import BMOConnection; connection = BMOConnection('COM99', 115200); connection.start(); time.sleep(1); print('Connected:', connection.is_connected); print('Error:', connection.last_error); connection.stop(); print('Program finished normally')"
+// .\.venv\Scripts\python.exe -c "import time; from config import SERIAL_PORT, BAUDRATE, SERIAL_TIMEOUT; from communication.serial import BMOConnection; connection = BMOConnection(SERIAL_PORT, BAUDRATE, SERIAL_TIMEOUT); connection.start(); time.sleep(2); print('Connected:', connection.is_connected); print('Error:', connection.last_error); connection.stop(); print('Connection closed')"
