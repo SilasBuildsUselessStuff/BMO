@@ -16,3 +16,11 @@ BMO_HEIGHT = 320
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 WINDOW_TITLE = "BMO Companion App - Development"
+
+# PC microphone recording
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_CHANNELS = 1
+AUDIO_DTYPE = "float32"
+
+# None uses the default Windows input device.
+AUDIO_INPUT_DEVICE = None
