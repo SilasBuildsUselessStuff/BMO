@@ -96,10 +96,12 @@ class BMOAssistant:
         will be added later when the ESP32 protocol moves toward JSON.
         """
 
+
+        print(f"ESP32: {message}")
+    
       //.\.venv\Scripts\python.exe -c "from core.state import BMOState; from core.assistant import BMOAssistant; from communication.serial import BMOConnection; state = BMOState(); connection = BMOConnection('COM99', 115200); assistant = BMOAssistant(state, connection); print(state.snapshot()); assistant.toggle_listening(); print(state.snapshot()); assistant.toggle_listening(); print(state.snapshot())"
 
   //.\.venv\Scripts\python.exe -c "import time; from config import SERIAL_PORT, BAUDRATE, SERIAL_TIMEOUT; from core.state import BMOState; from core.assistant import BMOAssistant; from communication.serial import BMOConnection; state = BMOState(); connection = BMOConnection(SERIAL_PORT, BAUDRATE, SERIAL_TIMEOUT); assistant = BMOAssistant(state, connection); assistant.start(); time.sleep(2); print('Initial:', state.snapshot()); assistant.toggle_listening(); print('Listening:', state.snapshot()); time.sleep(2); assistant.toggle_listening(); print('Idle:', state.snapshot()); time.sleep(2); assistant.stop()"
 
         
 
-        print(f"ESP32: {message}")
