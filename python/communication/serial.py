@@ -82,27 +82,26 @@ class BMOConnection:
         )
         self._thread.start()
 
-    def stop(self) -> None:
-        """Stop the serial worker and close the serial port."""
+        def stop(self) -> None:
+        """
+        Stop the serial worker and close the serial port.
+
+        The worker thread owns the serial connection and closes it in its
+        finally block. Because readline() uses a short timeout, setting the
+        stop event is enough to let the worker exit without another thread
+        closing the same Windows handle concurrently.
+        """
 
         self._stop_event.set()
 
-        # Closing the port helps unblock an active readline operation.
-        with self._connection_lock:
-            connection = self._serial
-
-        if connection is not None:
-            try:
-                connection.close()
-            except (SerialException, OSError):
-                pass
+        thread = self._thread
 
         if (
-            self._thread is not None
-            and self._thread.is_alive()
-            and self._thread is not current_thread()
+            thread is not None
+            and thread.is_alive()
+            and thread is not current_thread()
         ):
-            self._thread.join(timeout=1.0)
+            thread.join(timeout=max(1.0, self.timeout + 0.5))
 
         self._thread = None
         self._set_connected(False)
@@ -138,12 +137,10 @@ class BMOConnection:
 
         except (SerialException, OSError) as error:
             self._record_error(error)
+            self._set_connected(False)
 
-            try:
-                connection.close()
-            except (SerialException, OSError):
-                pass
-
+            # Let the serial worker close its own connection.
+            self._stop_event.set()
             return False
 
     def _serial_worker(self) -> None:
