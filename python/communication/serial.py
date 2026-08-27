@@ -185,7 +185,10 @@ class BMOConnection:
             if connection is not None:
                 try:
                     connection.close()
-                except (SerialException, OSError):
+                except (SerialException, OSError, AttributeError):
+                    # AttributeError is defensively handled for a known
+                    # PySerial Windows edge case involving partially closed
+                    # overlapped I/O handles.
                     pass
 
             self._set_connected(False)
