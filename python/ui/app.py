@@ -13,8 +13,8 @@ class BMOApp(ttk.Frame):
     """
     Development and debugging interface for BMO.
 
-    This GUI represents the Windows Companion App, not the 480x320 display
-    shown on the physical BMO.
+    This is the Windows Companion App interface. It is separate from the
+    480x320 display shown on the physical BMO.
     """
 
     UPDATE_INTERVAL_MS = 100
@@ -35,12 +35,15 @@ class BMOApp(ttk.Frame):
 
         self._closing = False
 
-        # Tkinter variables make it easy to update labels.
+        # Tkinter variables are updated only by the GUI thread.
         self.face_text = tk.StringVar(value="^_^")
         self.status_text = tk.StringVar(value="idle")
         self.expression_text = tk.StringVar(value="IDLE")
         self.connection_text = tk.StringVar(value="DISCONNECTED")
+
         self.serial_error_text = tk.StringVar(value="")
+        self.application_error_text = tk.StringVar(value="")
+
         self.user_input_text = tk.StringVar(value="—")
         self.bmo_response_text = tk.StringVar(value="—")
         self.listen_button_text = tk.StringVar(value="LISTEN")
@@ -48,11 +51,11 @@ class BMOApp(ttk.Frame):
         self._configure_styles()
         self._build_layout()
 
-        # Closing through the window's X button follows the same cleanup path.
+        # Closing through the window's X button uses the same cleanup path.
         self.master.protocol("WM_DELETE_WINDOW", self._handle_close)
 
-        # Poll the thread-safe state regularly. Tkinter widgets are only
-        # updated here on the main GUI thread.
+        # Poll the thread-safe state. Background threads never update
+        # Tkinter widgets directly.
         self.after(self.UPDATE_INTERVAL_MS, self._refresh_from_state)
 
     def _configure_styles(self) -> None:
@@ -165,6 +168,20 @@ class BMOApp(ttk.Frame):
             column=0,
             columnspan=2,
             sticky="w",
+            pady=(5, 0),
+        )
+
+        application_error_label = ttk.Label(
+            information,
+            textvariable=self.application_error_text,
+            foreground="#a04040",
+            wraplength=550,
+        )
+        application_error_label.grid(
+            row=4,
+            column=0,
+            columnspan=2,
+            sticky="w",
             pady=(5, 10),
         )
 
@@ -203,13 +220,13 @@ class BMOApp(ttk.Frame):
             pady=(5, 5),
         )
 
-        listen_button = ttk.Button(
+        self.listen_button = ttk.Button(
             button_frame,
             textvariable=self.listen_button_text,
             command=self._toggle_listening,
             style="Listen.TButton",
         )
-        listen_button.pack()
+        self.listen_button.pack()
 
     @staticmethod
     def _add_information_row(
@@ -247,7 +264,12 @@ class BMOApp(ttk.Frame):
         )
 
     def _toggle_listening(self) -> None:
-        """Handle the LISTEN button without performing blocking work."""
+        """
+        Handle the voice button.
+
+        Starting and stopping the sounddevice stream are quick operations.
+        Slow Whisper processing runs in the assistant's worker thread.
+        """
 
         self.assistant.toggle_listening()
 
@@ -255,9 +277,8 @@ class BMOApp(ttk.Frame):
         """
         Refresh GUI values from the central state.
 
-        Serial callbacks run in a background thread and must never manipulate
-        Tkinter widgets directly. Reading a state snapshot here keeps all GUI
-        work safely on Tkinter's main thread.
+        This method runs only on Tkinter's main thread. It is safe for it to
+        update widgets after reading the thread-safe state snapshot.
         """
 
         if self._closing:
@@ -267,27 +288,58 @@ class BMOApp(ttk.Frame):
 
         self.status_text.set(snapshot.status.value)
         self.expression_text.set(snapshot.expression.value)
+        self.user_input_text.set(snapshot.last_user_input)
+        self.bmo_response_text.set(snapshot.last_bmo_response)
 
-        if snapshot.connected:
-            self.connection_text.set("CONNECTED")
-            self.serial_error_text.set("")
-        else:
-            self.connection_text.set("DISCONNECTED")
-
-            error = self.assistant.connection.last_error
-            if error:
-                self.serial_error_text.set(f"Serial: {error}")
-            else:
-                self.serial_error_text.set("")
-
-        if snapshot.listening:
-            self.listen_button_text.set("STOP LISTENING")
-        else:
-            self.listen_button_text.set("LISTEN")
+        self._update_connection_display(snapshot)
+        self._update_voice_display(snapshot)
 
         self.face_text.set(self._face_for_expression(snapshot))
 
         self.after(self.UPDATE_INTERVAL_MS, self._refresh_from_state)
+
+    def _update_connection_display(
+        self,
+        snapshot: BMOStateSnapshot,
+    ) -> None:
+        """Update the serial connection information."""
+
+        if snapshot.connected:
+            self.connection_text.set("CONNECTED")
+            self.serial_error_text.set("")
+            return
+
+        self.connection_text.set("DISCONNECTED")
+
+        serial_error = self.assistant.connection.last_error
+
+        if serial_error:
+            self.serial_error_text.set(f"Serial: {serial_error}")
+        else:
+            self.serial_error_text.set("")
+
+    def _update_voice_display(
+        self,
+        snapshot: BMOStateSnapshot,
+    ) -> None:
+        """Update voice errors and LISTEN button state."""
+
+        if snapshot.error_message:
+            self.application_error_text.set(
+                f"Voice: {snapshot.error_message}"
+            )
+        else:
+            self.application_error_text.set("")
+
+        if snapshot.thinking:
+            self.listen_button_text.set("THINKING...")
+            self.listen_button.state(["disabled"])
+        elif snapshot.listening:
+            self.listen_button_text.set("STOP LISTENING")
+            self.listen_button.state(["!disabled"])
+        else:
+            self.listen_button_text.set("LISTEN")
+            self.listen_button.state(["!disabled"])
 
     @staticmethod
     def _face_for_expression(snapshot: BMOStateSnapshot) -> str:
@@ -317,3 +369,7 @@ class BMOApp(ttk.Frame):
 
         self._closing = True
         self.on_close()
+
+
+//.\.venv\Scripts\python.exe -c "from main import main; from ui.app import BMOApp; print('V0.2 GUI integration loaded successfully')"
+//.\.venv\Scripts\python.exe main.py
