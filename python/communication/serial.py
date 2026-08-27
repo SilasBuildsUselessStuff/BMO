@@ -82,7 +82,7 @@ class BMOConnection:
         )
         self._thread.start()
 
-        def stop(self) -> None:
+    def stop(self) -> None:
         """
         Stop the serial worker and close the serial port.
 
