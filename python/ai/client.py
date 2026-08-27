@@ -151,3 +151,5 @@ class OllamaClient(AIClient):
             return response.text.strip()
 
         return f"HTTP {response.status_code}"
+
+//.\.venv\Scripts\python.exe -c "from ai.client import AIClient, AIError, OllamaClient; from ai.personality import BMO_SYSTEM_PROMPT; print('AI modules loaded successfully')"
