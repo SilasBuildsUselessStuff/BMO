@@ -1,5 +1,7 @@
-"""Local Windows text-to-speech support for BMO."""
+"""Provider-independent text-to-speech support for BMO."""
 
+import re
+from abc import ABC, abstractmethod
 from threading import Event, RLock
 from typing import Optional
 
@@ -11,15 +13,76 @@ class TTSError(RuntimeError):
     """Raised when text-to-speech cannot be completed."""
 
 
-class WindowsTTS:
+def prepare_text_for_speech(
+    text: str,
+    bmo_pronunciation: str = "Beemo",
+) -> str:
     """
-    Speak text through Windows SAPI.
+    Prepare display text for speech synthesis.
 
-    Speech runs on whichever thread calls speak(). The BMO assistant will
-    call it from its background interaction thread so Tkinter remains
-    responsive.
+    The canonical name remains written as "BMO" everywhere in the
+    application. Only the temporary text passed to the speech engine uses
+    the phonetic spelling "Beemo".
 
-    A cancellation event allows application shutdown to interrupt speech.
+    Examples:
+        "Hello, BMO!" -> "Hello, Beemo!"
+        "BMO's game"  -> "Beemo's game"
+
+    This prevents Windows SAPI from saying "B M O".
+    """
+
+    prepared = text.strip()
+
+    if not prepared:
+        return ""
+
+    # Match BMO as a complete term while preserving words that merely contain
+    # those letters.
+    prepared = re.sub(
+        r"\bBMO\b",
+        bmo_pronunciation,
+        prepared,
+        flags=re.IGNORECASE,
+    )
+
+    return prepared
+
+
+class TTSProvider(ABC):
+    """
+    Common interface for a text-to-speech backend.
+
+    BMOAssistant will depend on this interface instead of Windows SAPI.
+    A neural local voice can therefore replace WindowsTTS later without
+    changing the state machine, GUI, or interaction pipeline.
+    """
+
+    @property
+    @abstractmethod
+    def is_speaking(self) -> bool:
+        """Return whether speech is currently active."""
+
+    @abstractmethod
+    def speak(self, text: str) -> None:
+        """
+        Speak the supplied text.
+
+        Implementations may block the calling worker thread until playback
+        finishes, but they must never be called directly on Tkinter's thread.
+        """
+
+    @abstractmethod
+    def cancel(self) -> None:
+        """Request cancellation of the active speech operation."""
+
+
+class WindowsTTS(TTSProvider):
+    """
+    Speak through Windows SAPI.
+
+    This is the initial TTS backend used to validate BMO's complete voice
+    loop. It can later be replaced with a local neural implementation that
+    implements the same TTSProvider interface.
     """
 
     # Windows SAPI speech flags.
@@ -31,10 +94,12 @@ class WindowsTTS:
         voice_name: Optional[str] = None,
         rate: int = 1,
         volume: int = 100,
+        bmo_pronunciation: str = "Beemo",
     ) -> None:
         self.voice_name = voice_name
         self.rate = max(-10, min(10, rate))
         self.volume = max(0, min(100, volume))
+        self.bmo_pronunciation = bmo_pronunciation
 
         self._lock = RLock()
         self._cancel_event = Event()
@@ -42,7 +107,7 @@ class WindowsTTS:
 
     @property
     def is_speaking(self) -> bool:
-        """Return whether a speech operation is currently active."""
+        """Return whether speech is currently active."""
 
         with self._lock:
             return self._speaking
@@ -51,12 +116,15 @@ class WindowsTTS:
         """
         Speak text through the default Windows audio output.
 
-        This is a blocking method from the calling thread's perspective.
-        The GUI remains responsive when it is called from a worker thread.
+        The canonical text is converted to a speech-friendly version before
+        it reaches SAPI. The original string is not modified.
+
+        This method blocks its calling thread while audio is playing.
+        BMOAssistant will call it from a background worker thread.
 
         Raises:
-            TTSError: If the text is empty, the requested voice cannot be
-            found, or Windows cannot synthesize the speech.
+            TTSError: If text is empty, speech is already active, the selected
+            voice cannot be found, or Windows SAPI fails.
         """
 
         cleaned_text = text.strip()
@@ -64,15 +132,19 @@ class WindowsTTS:
         if not cleaned_text:
             raise TTSError("Cannot speak empty text.")
 
-        self._cancel_event.clear()
+        spoken_text = prepare_text_for_speech(
+            cleaned_text,
+            self.bmo_pronunciation,
+        )
 
         with self._lock:
             if self._speaking:
                 raise TTSError("Text-to-speech is already active.")
 
+            self._cancel_event.clear()
             self._speaking = True
 
-        # Every thread using Windows COM must initialize COM for itself.
+        # Each thread that uses Windows COM must initialize it independently.
         pythoncom.CoInitialize()
 
         speaker = None
@@ -85,9 +157,9 @@ class WindowsTTS:
             if self.voice_name:
                 self._select_voice(speaker, self.voice_name)
 
-            # Start asynchronously within this worker thread. Polling allows
-            # cancel() to interrupt speech during application shutdown.
-            speaker.Speak(cleaned_text, self._ASYNC)
+            # SAPI speaks asynchronously within this worker. Polling lets us
+            # notice a cancellation request during application shutdown.
+            speaker.Speak(spoken_text, self._ASYNC)
 
             while not speaker.WaitUntilDone(100):
                 if self._cancel_event.is_set():
@@ -122,9 +194,9 @@ class WindowsTTS:
 
     def cancel(self) -> None:
         """
-        Request cancellation of current speech.
+        Request cancellation of active speech.
 
-        The worker executing speak() notices this event and purges its SAPI
+        The worker running speak() notices this event and purges the SAPI
         speech queue.
         """
 
@@ -132,28 +204,34 @@ class WindowsTTS:
 
     @staticmethod
     def available_voices() -> list[str]:
-        """Return descriptions of all Windows SAPI voices."""
+        """Return descriptions of all installed Windows SAPI voices."""
 
         pythoncom.CoInitialize()
 
         try:
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
+
             return [
                 voice.GetDescription()
                 for voice in speaker.GetVoices()
             ]
+
         except Exception as error:
             raise TTSError(
                 f"Could not list Windows voices: {error}"
             ) from error
+
         finally:
             pythoncom.CoUninitialize()
 
     @staticmethod
-    def _select_voice(speaker: object, requested_name: str) -> None:
+    def _select_voice(
+        speaker: object,
+        requested_name: str,
+    ) -> None:
         """
         Select the first installed voice whose description contains the
-        configured name, ignoring capitalization.
+        requested name, ignoring capitalization.
         """
 
         requested = requested_name.casefold()
@@ -169,50 +247,22 @@ class WindowsTTS:
             f"Windows voice containing '{requested_name}' was not found."
         )
 
-  //.\.venv\Scripts\python.exe -c "from voice.tts import WindowsTTS, TTSError; print('TTS module loaded successfully')"
+//.\.venv\Scripts\python.exe -c "from voice.tts import TTSProvider, WindowsTTS, TTSError; print('Modular TTS loaded successfully'); print('WindowsTTS is a TTSProvider:', issubclass(WindowsTTS, TTSProvider))"
 
-//.\.venv\Scripts\python.exe -c "from voice.tts import WindowsTTS; print(*WindowsTTS.available_voices(), sep='\n')"
+//@'
+from voice.tts import prepare_text_for_speech
 
-    @'
-from config import TTS_RATE, TTS_VOICE_NAME, TTS_VOLUME
-from voice.tts import WindowsTTS
+examples = [
+    "Hello, BMO!",
+    "BMO is ready for an adventure.",
+    "This is BMO's favorite game.",
+    "The name is bmo.",
+    "The submarine moved below us.",
+]
 
-tts = WindowsTTS(
-    voice_name=TTS_VOICE_NAME,
-    rate=TTS_RATE,
-    volume=TTS_VOLUME,
-)
-
-print("Speaking...")
-tts.speak("Hello! BMO can talk now. This is very exciting!")
-print("Finished speaking.")
-'@ | .\.venv\Scripts\python.exe -
-
-
-
-@'
-import time
-from threading import Thread
-
-from voice.tts import WindowsTTS
-
-tts = WindowsTTS(rate=0)
-
-speech_thread = Thread(
-    target=tts.speak,
-    args=(
-        "This is a deliberately long sentence that should stop before "
-        "BMO reaches the end because we are testing speech cancellation.",
-    ),
-)
-
-speech_thread.start()
-time.sleep(1)
-
-print("Cancelling speech...")
-tts.cancel()
-
-speech_thread.join()
-print("Speaking:", tts.is_speaking)
-print("Cancellation test finished.")
+for original in examples:
+    spoken = prepare_text_for_speech(original)
+    print(f"Display: {original}")
+    print(f"Speech:  {spoken}")
+    print()
 '@ | .\.venv\Scripts\python.exe -
