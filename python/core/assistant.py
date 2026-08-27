@@ -1,4 +1,4 @@
-"""Controller connecting BMO state, voice, AI, and serial communication."""
+"""Controller connecting BMO state, voice, AI, TTS, and serial communication."""
 
 from threading import Event, RLock, Thread
 from typing import Optional
@@ -9,15 +9,16 @@ from ai.client import AIClient, AIError
 from communication.serial import BMOConnection
 from core.state import BMOExpression, BMOState
 from voice.listener import MicrophoneError, MicrophoneListener
+from voice.tts import TTSError, TTSProvider
 from voice.whisper import TranscriptionError, WhisperTranscriber
 
 
 class BMOAssistant:
     """
-    Coordinate BMO's state, voice components, AI, and ESP32 connection.
+    Coordinate BMO's state, voice components, AI, TTS, and ESP32 connection.
 
-    Whisper transcription and AI response generation run in a worker thread,
-    preventing slow operations from freezing Tkinter.
+    Whisper, Ollama, and TTS all run in a background interaction thread.
+    This keeps Tkinter responsive throughout the complete voice interaction.
     """
 
     def __init__(
@@ -27,12 +28,14 @@ class BMOAssistant:
         listener: Optional[MicrophoneListener] = None,
         transcriber: Optional[WhisperTranscriber] = None,
         ai_client: Optional[AIClient] = None,
+        tts: Optional[TTSProvider] = None,
     ) -> None:
         self.state = state
         self.connection = connection
         self.listener = listener
         self.transcriber = transcriber
         self.ai_client = ai_client
+        self.tts = tts
 
         self._voice_lock = RLock()
         self._interaction_thread: Optional[Thread] = None
@@ -49,12 +52,15 @@ class BMOAssistant:
         self.connection.start()
 
     def stop(self) -> None:
-        """Stop microphone and serial communication cleanly."""
+        """Stop microphone, speech, and serial communication cleanly."""
 
         self._shutdown_event.set()
 
         if self.listener is not None:
             self.listener.cancel_recording()
+
+        if self.tts is not None:
+            self.tts.cancel()
 
         self.connection.stop()
         self.state.set_connected(False)
@@ -63,13 +69,14 @@ class BMOAssistant:
         """
         Start or stop a voice interaction.
 
-        While BMO is thinking, additional button presses are ignored to
-        prevent multiple overlapping Whisper or Ollama operations.
+        Button presses are ignored while BMO is thinking or talking. This
+        prevents overlapping interactions and stops BMO from recording its
+        own synthesized voice.
         """
 
         snapshot = self.state.snapshot()
 
-        if snapshot.thinking:
+        if snapshot.thinking or snapshot.speaking:
             return
 
         if snapshot.listening:
@@ -101,8 +108,14 @@ class BMOAssistant:
         self.state.enter_thinking()
         self._send_expression(BMOExpression.THINKING)
 
+    def enter_talking(self) -> None:
+        """Put BMO into TALKING and notify the ESP32."""
+
+        self.state.enter_talking()
+        self._send_expression(BMOExpression.TALKING)
+
     def _voice_is_configured(self) -> bool:
-        """Return whether both required voice components are available."""
+        """Return whether both required voice-input components are available."""
 
         return self.listener is not None and self.transcriber is not None
 
@@ -118,7 +131,7 @@ class BMOAssistant:
 
             self.state.clear_error()
 
-            # Remove the previous answer while a new interaction is active.
+            # Remove the previous response while a new interaction is active.
             self.state.set_last_bmo_response("—")
 
             try:
@@ -132,10 +145,14 @@ class BMOAssistant:
 
     def _stop_listening_and_process(self) -> None:
         """
-        Stop microphone recording and start the interaction worker.
+        Stop recording and start the background interaction worker.
 
-        The worker first transcribes the recording and then, if configured,
-        asks the AI client to generate BMO's response.
+        The worker performs:
+
+            recorded audio
+                -> Whisper
+                -> Ollama
+                -> TTS
         """
 
         if self.listener is None or self.transcriber is None:
@@ -162,10 +179,10 @@ class BMOAssistant:
 
     def _process_interaction(self, audio: np.ndarray) -> None:
         """
-        Run Whisper followed by the AI backend.
+        Run Whisper, Ollama, and TTS in a background thread.
 
-        This method executes in a background thread. It only updates the
-        thread-safe BMOState and never accesses Tkinter widgets directly.
+        This method only modifies the thread-safe central state. It never
+        accesses Tkinter widgets directly.
         """
 
         if self.transcriber is None:
@@ -174,7 +191,7 @@ class BMOAssistant:
             return
 
         try:
-            # Stage 1: microphone audio -> text
+            # Stage 1: microphone audio -> transcript
             transcript = self.transcriber.transcribe(audio)
 
             if self._shutdown_event.is_set():
@@ -190,7 +207,7 @@ class BMOAssistant:
             self.state.clear_error()
             print(f"You: {transcript}")
 
-            # Keeping the AI optional preserves the modular V0.2 behavior.
+            # Keeping AI optional preserves modularity.
             if self.ai_client is None:
                 return
 
@@ -200,9 +217,22 @@ class BMOAssistant:
             if self._shutdown_event.is_set():
                 return
 
+            # Store canonical text before preparing or speaking it.
             self.state.set_last_bmo_response(response)
             self.state.clear_error()
             print(f"BMO: {response}")
+
+            # Keeping TTS optional preserves the text-only V0.3 behavior.
+            if self.tts is None:
+                return
+
+            # Stage 3: BMO response -> speech
+            self.enter_talking()
+
+            if self._shutdown_event.is_set():
+                return
+
+            self.tts.speak(response)
 
         except TranscriptionError as error:
             if not self._shutdown_event.is_set():
@@ -215,6 +245,12 @@ class BMOAssistant:
                 message = f"AI: {error}"
                 self.state.set_error(message)
                 self.state.set_last_bmo_response("—")
+                print(message)
+
+        except TTSError as error:
+            if not self._shutdown_event.is_set():
+                message = f"TTS: {error}"
+                self.state.set_error(message)
                 print(message)
 
         except Exception as error:
