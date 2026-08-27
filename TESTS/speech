@@ -72,3 +72,34 @@ print(state.snapshot())
 
 assistant.stop()
 '@ | .\.venv\Scripts\python.exe -
+
+
+
+
+
+@'
+import time
+
+from communication.serial import BMOConnection
+from config import SERIAL_PORT, BAUDRATE, SERIAL_TIMEOUT
+
+for attempt in range(1, 6):
+    print(f"Attempt {attempt}")
+
+    connection = BMOConnection(
+        SERIAL_PORT,
+        BAUDRATE,
+        SERIAL_TIMEOUT,
+    )
+
+    connection.start()
+    time.sleep(0.5)
+
+    print("Connected:", connection.is_connected)
+
+    connection.stop()
+    print("Stopped cleanly")
+    time.sleep(0.2)
+
+print("All shutdown tests completed")
+'@ | .\.venv\Scripts\python.exe -
