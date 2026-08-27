@@ -1,0 +1,74 @@
+@'
+import time
+
+from communication.serial import BMOConnection
+from config import (
+    SERIAL_PORT,
+    BAUDRATE,
+    SERIAL_TIMEOUT,
+    AUDIO_SAMPLE_RATE,
+    AUDIO_CHANNELS,
+    AUDIO_DTYPE,
+    AUDIO_INPUT_DEVICE,
+    WHISPER_MODEL,
+    WHISPER_DEVICE,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_LANGUAGE,
+)
+from core.assistant import BMOAssistant
+from core.state import BMOState
+from voice.listener import MicrophoneListener
+from voice.whisper import WhisperTranscriber
+
+state = BMOState()
+
+connection = BMOConnection(
+    SERIAL_PORT,
+    BAUDRATE,
+    SERIAL_TIMEOUT,
+)
+
+listener = MicrophoneListener(
+    AUDIO_SAMPLE_RATE,
+    AUDIO_CHANNELS,
+    AUDIO_DTYPE,
+    AUDIO_INPUT_DEVICE,
+)
+
+transcriber = WhisperTranscriber(
+    WHISPER_MODEL,
+    WHISPER_DEVICE,
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_LANGUAGE,
+)
+
+assistant = BMOAssistant(
+    state,
+    connection,
+    listener,
+    transcriber,
+)
+
+assistant.start()
+time.sleep(1)
+
+print("Starting listening...")
+assistant.toggle_listening()
+print(state.snapshot())
+
+print("Speak clearly for 5 seconds...")
+time.sleep(5)
+
+print("Stopping listening...")
+assistant.toggle_listening()
+print(state.snapshot())
+
+while state.snapshot().thinking:
+    print("Whisper is thinking...")
+    time.sleep(1)
+
+print("Final state:")
+print(state.snapshot())
+
+assistant.stop()
+'@ | .\.venv\Scripts\python.exe -
