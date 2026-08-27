@@ -374,5 +374,6 @@ class BMOApp(ttk.Frame):
         self.on_close()
 
 
-//.\.venv\Scripts\python.exe -c "from main import main; from ui.app import BMOApp; print('V0.2 GUI integration loaded successfully')"
+//.\.venv\Scripts\python.exe -c "from main import main; from core.assistant import BMOAssistant; from voice.tts import TTSProvider, WindowsTTS; print('V0.4 integration loaded successfully')"
+
 //.\.venv\Scripts\python.exe main.py
