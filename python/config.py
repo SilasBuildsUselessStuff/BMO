@@ -30,3 +30,13 @@ WHISPER_MODEL = "base.en"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 WHISPER_LANGUAGE = "en"
+
+# Local AI through Ollama
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_MODEL = "qwen2.5:7b"
+OLLAMA_TIMEOUT = 120.0
+OLLAMA_KEEP_ALIVE = "10m"
+
+# Response generation settings
+OLLAMA_TEMPERATURE = 0.7
+OLLAMA_MAX_TOKENS = 120
