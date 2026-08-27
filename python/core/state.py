@@ -47,7 +47,7 @@ class BMOExpression(str, Enum):
 
 
 class BMOStatus(str, Enum):
-    """Current activity of the companion application."""
+    """Current activity of the Companion App."""
 
     IDLE = "idle"
     LISTENING = "listening"
@@ -56,7 +56,6 @@ class BMOStatus(str, Enum):
 
 
 # Larger numbers represent more important expressions.
-# This will later prevent idle animations from replacing critical states.
 EXPRESSION_PRIORITIES = {
     BMOExpression.HAPPY: 1,
     BMOExpression.IDLE: 1,
@@ -82,29 +81,28 @@ EXPRESSION_PRIORITIES = {
 
 @dataclass(frozen=True)
 class BMOStateSnapshot:
-    """
-    Read-only copy of BMO's current state.
-
-    The GUI can safely read a snapshot without directly modifying the
-    central state.
-    """
+    """Read-only copy of BMO's current state."""
 
     screen: BMOScreen
     expression: BMOExpression
     status: BMOStatus
+
     connected: bool
     listening: bool
     thinking: bool
     speaking: bool
 
+    last_user_input: str
+    last_bmo_response: str
+    error_message: str
+
 
 class BMOState:
     """
-    Thread-safe central state for the application.
+    Thread-safe central application state.
 
-    Serial communication will later run in a background thread while
-    Tkinter runs on the main thread. The lock prevents the GUI from reading
-    state while another thread is changing it.
+    Tkinter runs on the main thread, while serial communication and Whisper
+    use worker threads. Every state read and write therefore uses a lock.
     """
 
     def __init__(self) -> None:
@@ -118,6 +116,10 @@ class BMOState:
         self._listening = False
         self._thinking = False
         self._speaking = False
+
+        self._last_user_input = "—"
+        self._last_bmo_response = "—"
+        self._error_message = ""
 
     def set_connected(self, connected: bool) -> None:
         """Update the ESP32 connection state."""
@@ -139,10 +141,8 @@ class BMOState:
         """
         Attempt to change BMO's expression.
 
-        When force is False, an expression may only replace another
-        expression with the same or a lower priority.
-
-        Returns True if the expression was changed.
+        Unless force is True, an expression cannot replace one with a higher
+        priority.
         """
 
         with self._lock:
@@ -155,12 +155,37 @@ class BMOState:
             self._expression = expression
             return True
 
+    def set_last_user_input(self, text: str) -> None:
+        """Store the latest recognized user speech."""
+
+        with self._lock:
+            self._last_user_input = text
+
+    def set_last_bmo_response(self, text: str) -> None:
+        """Store BMO's latest response for future AI integration."""
+
+        with self._lock:
+            self._last_bmo_response = text
+
+    def set_error(self, message: str) -> None:
+        """Store a recoverable application error."""
+
+        with self._lock:
+            self._error_message = message
+
+    def clear_error(self) -> None:
+        """Remove the current application error."""
+
+        with self._lock:
+            self._error_message = ""
+
     def enter_idle(self) -> None:
         """Return BMO to its normal idle state."""
 
         with self._lock:
             self._expression = BMOExpression.IDLE
             self._status = BMOStatus.IDLE
+
             self._listening = False
             self._thinking = False
             self._speaking = False
@@ -171,16 +196,18 @@ class BMOState:
         with self._lock:
             self._expression = BMOExpression.LISTENING
             self._status = BMOStatus.LISTENING
+
             self._listening = True
             self._thinking = False
             self._speaking = False
 
     def enter_thinking(self) -> None:
-        """Put BMO into its thinking state for future voice support."""
+        """Put BMO into its thinking state."""
 
         with self._lock:
             self._expression = BMOExpression.THINKING
             self._status = BMOStatus.THINKING
+
             self._listening = False
             self._thinking = True
             self._speaking = False
@@ -191,12 +218,13 @@ class BMOState:
         with self._lock:
             self._expression = BMOExpression.TALKING
             self._status = BMOStatus.TALKING
+
             self._listening = False
             self._thinking = False
             self._speaking = True
 
     def snapshot(self) -> BMOStateSnapshot:
-        """Return a consistent, read-only copy of the current state."""
+        """Return a consistent, read-only state copy."""
 
         with self._lock:
             return BMOStateSnapshot(
@@ -207,4 +235,7 @@ class BMOState:
                 listening=self._listening,
                 thinking=self._thinking,
                 speaking=self._speaking,
+                last_user_input=self._last_user_input,
+                last_bmo_response=self._last_bmo_response,
+                error_message=self._error_message,
             )
