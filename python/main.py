@@ -2,6 +2,8 @@
 
 import tkinter as tk
 
+from ai.client import OllamaClient
+from ai.personality import BMO_SYSTEM_PROMPT
 from communication.serial import BMOConnection
 from config import (
     AUDIO_CHANNELS,
@@ -9,6 +11,12 @@ from config import (
     AUDIO_INPUT_DEVICE,
     AUDIO_SAMPLE_RATE,
     BAUDRATE,
+    OLLAMA_BASE_URL,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_MAX_TOKENS,
+    OLLAMA_MODEL,
+    OLLAMA_TEMPERATURE,
+    OLLAMA_TIMEOUT,
     SERIAL_PORT,
     SERIAL_TIMEOUT,
     WHISPER_COMPUTE_TYPE,
@@ -29,10 +37,10 @@ from voice.whisper import WhisperTranscriber
 def main() -> None:
     """Create and run the BMO Companion development application."""
 
-    # Central thread-safe state shared by the controller and GUI.
+    # Central thread-safe application state.
     state = BMOState()
 
-    # Non-blocking USB serial communication with the ESP32.
+    # Non-blocking USB serial connection to the ESP32.
     connection = BMOConnection(
         port=SERIAL_PORT,
         baudrate=BAUDRATE,
@@ -47,8 +55,7 @@ def main() -> None:
         device=AUDIO_INPUT_DEVICE,
     )
 
-    # Local speech-to-text model. The model is loaded lazily during the first
-    # transcription, so application startup remains quick.
+    # Local Whisper speech-to-text model.
     transcriber = WhisperTranscriber(
         model_name=WHISPER_MODEL,
         device=WHISPER_DEVICE,
@@ -56,13 +63,24 @@ def main() -> None:
         language=WHISPER_LANGUAGE,
     )
 
-    # The assistant coordinates state, serial communication, recording,
-    # and background transcription.
+    # Provider-independent AI implementation backed by local Ollama.
+    ai_client = OllamaClient(
+        base_url=OLLAMA_BASE_URL,
+        model=OLLAMA_MODEL,
+        system_prompt=BMO_SYSTEM_PROMPT,
+        timeout=OLLAMA_TIMEOUT,
+        keep_alive=OLLAMA_KEEP_ALIVE,
+        temperature=OLLAMA_TEMPERATURE,
+        max_tokens=OLLAMA_MAX_TOKENS,
+    )
+
+    # Coordinator for serial, microphone, Whisper, AI, and state.
     assistant = BMOAssistant(
         state=state,
         connection=connection,
         listener=listener,
         transcriber=transcriber,
+        ai_client=ai_client,
     )
 
     root = tk.Tk()
@@ -83,17 +101,15 @@ def main() -> None:
         on_close=close_application,
     )
 
-    # Serial work occurs in a background thread.
+    # Serial communication runs in its background worker.
     assistant.start()
 
     try:
         root.mainloop()
     finally:
-        # This also covers unexpected exits from the Tkinter event loop.
+        # Also clean up after an unexpected exit from Tkinter.
         assistant.stop()
 
 
 if __name__ == "__main__":
     main()
-
-  
