@@ -1,10 +1,11 @@
-"""Controller connecting BMO state, voice, and serial communication."""
+"""Controller connecting BMO state, voice, AI, and serial communication."""
 
 from threading import Event, RLock, Thread
 from typing import Optional
 
 import numpy as np
 
+from ai.client import AIClient, AIError
 from communication.serial import BMOConnection
 from core.state import BMOExpression, BMOState
 from voice.listener import MicrophoneError, MicrophoneListener
@@ -13,10 +14,10 @@ from voice.whisper import TranscriptionError, WhisperTranscriber
 
 class BMOAssistant:
     """
-    Coordinate BMO's state, voice components, and physical ESP32 connection.
+    Coordinate BMO's state, voice components, AI, and ESP32 connection.
 
-    Slow Whisper transcription is performed in a worker thread so it cannot
-    freeze the Tkinter GUI.
+    Whisper transcription and AI response generation run in a worker thread,
+    preventing slow operations from freezing Tkinter.
     """
 
     def __init__(
@@ -25,14 +26,16 @@ class BMOAssistant:
         connection: BMOConnection,
         listener: Optional[MicrophoneListener] = None,
         transcriber: Optional[WhisperTranscriber] = None,
+        ai_client: Optional[AIClient] = None,
     ) -> None:
         self.state = state
         self.connection = connection
         self.listener = listener
         self.transcriber = transcriber
+        self.ai_client = ai_client
 
         self._voice_lock = RLock()
-        self._transcription_thread: Optional[Thread] = None
+        self._interaction_thread: Optional[Thread] = None
         self._shutdown_event = Event()
 
         # Serial callbacks execute in the serial background thread.
@@ -40,7 +43,7 @@ class BMOAssistant:
         self.connection.on_message = self._on_serial_message
 
     def start(self) -> None:
-        """Start the connection to the physical BMO."""
+        """Start communication with the physical BMO."""
 
         self._shutdown_event.clear()
         self.connection.start()
@@ -58,21 +61,20 @@ class BMOAssistant:
 
     def toggle_listening(self) -> None:
         """
-        Start or stop the voice interaction.
+        Start or stop a voice interaction.
 
-        If voice components have not been supplied, this retains the original
-        V0.1 state-only behavior.
+        While BMO is thinking, additional button presses are ignored to
+        prevent multiple overlapping Whisper or Ollama operations.
         """
 
         snapshot = self.state.snapshot()
 
-        # Do not start another interaction while Whisper is working.
         if snapshot.thinking:
             return
 
         if snapshot.listening:
             if self._voice_is_configured():
-                self._stop_listening_and_transcribe()
+                self._stop_listening_and_process()
             else:
                 self.enter_idle()
         else:
@@ -100,12 +102,12 @@ class BMOAssistant:
         self._send_expression(BMOExpression.THINKING)
 
     def _voice_is_configured(self) -> bool:
-        """Return whether both required V0.2 voice components exist."""
+        """Return whether both required voice components are available."""
 
         return self.listener is not None and self.transcriber is not None
 
     def _start_listening(self) -> None:
-        """Start PC microphone recording."""
+        """Start recording through the PC microphone."""
 
         if self.listener is None:
             return
@@ -116,17 +118,25 @@ class BMOAssistant:
 
             self.state.clear_error()
 
+            # Remove the previous answer while a new interaction is active.
+            self.state.set_last_bmo_response("—")
+
             try:
                 self.listener.start_recording()
             except MicrophoneError as error:
-                self.state.set_error(str(error))
+                self.state.set_error(f"Microphone: {error}")
                 self.enter_idle()
                 return
 
             self.enter_listening()
 
-    def _stop_listening_and_transcribe(self) -> None:
-        """Stop microphone recording and begin transcription."""
+    def _stop_listening_and_process(self) -> None:
+        """
+        Stop microphone recording and start the interaction worker.
+
+        The worker first transcribes the recording and then, if configured,
+        asks the AI client to generate BMO's response.
+        """
 
         if self.listener is None or self.transcriber is None:
             self.enter_idle()
@@ -136,26 +146,26 @@ class BMOAssistant:
             try:
                 audio = self.listener.stop_recording()
             except MicrophoneError as error:
-                self.state.set_error(str(error))
+                self.state.set_error(f"Microphone: {error}")
                 self.enter_idle()
                 return
 
             self.enter_thinking()
 
-            self._transcription_thread = Thread(
-                target=self._transcribe_audio,
+            self._interaction_thread = Thread(
+                target=self._process_interaction,
                 args=(audio,),
-                name="BMO-Whisper",
+                name="BMO-Interaction",
                 daemon=True,
             )
-            self._transcription_thread.start()
+            self._interaction_thread.start()
 
-    def _transcribe_audio(self, audio: np.ndarray) -> None:
+    def _process_interaction(self, audio: np.ndarray) -> None:
         """
-        Transcribe recorded audio in a background worker.
+        Run Whisper followed by the AI backend.
 
-        This function must not manipulate Tkinter widgets directly. It only
-        updates the thread-safe central state.
+        This method executes in a background thread. It only updates the
+        thread-safe BMOState and never accesses Tkinter widgets directly.
         """
 
         if self.transcriber is None:
@@ -164,29 +174,53 @@ class BMOAssistant:
             return
 
         try:
+            # Stage 1: microphone audio -> text
             transcript = self.transcriber.transcribe(audio)
 
             if self._shutdown_event.is_set():
                 return
 
-            if transcript:
-                self.state.set_last_user_input(transcript)
-                self.state.clear_error()
-                print(f"You: {transcript}")
-            else:
+            if not transcript:
                 self.state.set_last_user_input("—")
                 self.state.set_error("No speech was detected.")
                 print("Whisper: No speech was detected.")
+                return
+
+            self.state.set_last_user_input(transcript)
+            self.state.clear_error()
+            print(f"You: {transcript}")
+
+            # Keeping the AI optional preserves the modular V0.2 behavior.
+            if self.ai_client is None:
+                return
+
+            # Stage 2: transcript -> BMO response
+            response = self.ai_client.generate_response(transcript)
+
+            if self._shutdown_event.is_set():
+                return
+
+            self.state.set_last_bmo_response(response)
+            self.state.clear_error()
+            print(f"BMO: {response}")
 
         except TranscriptionError as error:
             if not self._shutdown_event.is_set():
-                self.state.set_error(str(error))
-                print(f"Whisper error: {error}")
+                message = f"Whisper: {error}"
+                self.state.set_error(message)
+                print(message)
+
+        except AIError as error:
+            if not self._shutdown_event.is_set():
+                message = f"AI: {error}"
+                self.state.set_error(message)
+                self.state.set_last_bmo_response("—")
+                print(message)
 
         except Exception as error:
             # Protect the application from unexpected library-level errors.
             if not self._shutdown_event.is_set():
-                message = f"Unexpected transcription error: {error}"
+                message = f"Unexpected interaction error: {error}"
                 self.state.set_error(message)
                 print(message)
 
@@ -195,7 +229,7 @@ class BMOAssistant:
                 self.enter_idle()
 
     def _send_expression(self, expression: BMOExpression) -> bool:
-        """Send one expression command to the physical ESP32."""
+        """Send one expression command to the ESP32."""
 
         command = f"EXPRESSION:{expression.value}"
         return self.connection.send_line(command)
@@ -211,6 +245,7 @@ class BMOAssistant:
                 f"{self.connection.port} at {self.connection.baudrate} baud."
             )
 
+            # Synchronize the physical BMO with the current application state.
             current_expression = self.state.snapshot().expression
             self._send_expression(current_expression)
         else:
@@ -220,5 +255,3 @@ class BMOAssistant:
         """Log incoming ESP32 messages during development."""
 
         print(f"ESP32: {message}")
-
-//.\.venv\Scripts\python.exe -c "from core.assistant import BMOAssistant; from core.state import BMOState; print('Voice controller loaded successfully')"
