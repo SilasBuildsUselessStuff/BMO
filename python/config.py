@@ -24,3 +24,9 @@ AUDIO_DTYPE = "float32"
 
 # None uses the default Windows input device.
 AUDIO_INPUT_DEVICE = None
+
+# Local Whisper speech recognition
+WHISPER_MODEL = "base.en"
+WHISPER_DEVICE = "cpu"
+WHISPER_COMPUTE_TYPE = "int8"
+WHISPER_LANGUAGE = "en"
