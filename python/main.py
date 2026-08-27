@@ -113,3 +113,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+//.\.venv\Scripts\python.exe -c "from main import main; from core.assistant import BMOAssistant; print('V0.3 integration loaded successfully')"
