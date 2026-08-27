@@ -39,7 +39,7 @@ OLLAMA_KEEP_ALIVE = "10m"
 
 # Response generation settings
 OLLAMA_TEMPERATURE = 0.7
-OLLAMA_MAX_TOKENS = 120y
+OLLAMA_MAX_TOKENS = 120
 
 # Local Windows text-to-speech
 # None uses the default Windows voice.
@@ -50,3 +50,6 @@ TTS_RATE = 1
 
 # Volume range is 0 to 100.
 TTS_VOLUME = 100
+
+#Test shown in GUI Remains BMO but speech engine says Beemo
+TTS_BMO_Pronounciation = "Beemo"
