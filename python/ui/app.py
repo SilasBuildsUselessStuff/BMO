@@ -334,6 +334,9 @@ class BMOApp(ttk.Frame):
         if snapshot.thinking:
             self.listen_button_text.set("THINKING...")
             self.listen_button.state(["disabled"])
+        elif snapshot.speaking:
+            self.listen_button_text.set("TALKING...")
+            self.listen_button.state(["disabled"])
         elif snapshot.listening:
             self.listen_button_text.set("STOP LISTENING")
             self.listen_button.state(["!disabled"])
