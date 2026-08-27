@@ -39,4 +39,14 @@ OLLAMA_KEEP_ALIVE = "10m"
 
 # Response generation settings
 OLLAMA_TEMPERATURE = 0.7
-OLLAMA_MAX_TOKENS = 120
+OLLAMA_MAX_TOKENS = 120y
+
+# Local Windows text-to-speech
+# None uses the default Windows voice.
+TTS_VOICE_NAME = None
+
+# Windows SAPI rate range is approximately -10 to 10.
+TTS_RATE = 1
+
+# Volume range is 0 to 100.
+TTS_VOLUME = 100
