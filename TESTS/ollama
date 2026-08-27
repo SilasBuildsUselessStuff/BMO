@@ -1,0 +1,84 @@
+@'
+from ai.client import OllamaClient
+from ai.personality import BMO_SYSTEM_PROMPT
+from config import (
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_TEMPERATURE,
+    OLLAMA_MAX_TOKENS,
+)
+
+client = OllamaClient(
+    base_url=OLLAMA_BASE_URL,
+    model=OLLAMA_MODEL,
+    system_prompt=BMO_SYSTEM_PROMPT,
+    timeout=OLLAMA_TIMEOUT,
+    keep_alive=OLLAMA_KEEP_ALIVE,
+    temperature=OLLAMA_TEMPERATURE,
+    max_tokens=OLLAMA_MAX_TOKENS,
+)
+
+print("User: Hello BMO! Are you ready to become a real robot?")
+print("BMO is thinking...")
+
+response = client.generate_response(
+    "Hello BMO! Are you ready to become a real robot?"
+)
+
+print("BMO:", response)
+'@ | .\.venv\Scripts\python.exe -
+
+
+@'
+from ai.client import OllamaClient
+from ai.personality import BMO_SYSTEM_PROMPT
+from config import *
+
+client = OllamaClient(
+    base_url=OLLAMA_BASE_URL,
+    model=OLLAMA_MODEL,
+    system_prompt=BMO_SYSTEM_PROMPT,
+    timeout=OLLAMA_TIMEOUT,
+    keep_alive=OLLAMA_KEEP_ALIVE,
+    temperature=OLLAMA_TEMPERATURE,
+    max_tokens=OLLAMA_MAX_TOKENS,
+)
+
+questions = [
+    "What color is the sky on a clear day?",
+    "Tell me a tiny joke.",
+    "My name was transcribed as Beemo. What is your name?",
+]
+
+for question in questions:
+    print()
+    print("You:", question)
+    print("BMO:", client.generate_response(question))
+'@ | .\.venv\Scripts\python.exe -
+
+
+
+
+@'
+from ai.client import AIError, OllamaClient
+from ai.personality import BMO_SYSTEM_PROMPT
+
+client = OllamaClient(
+    base_url="http://127.0.0.1:9999",
+    model="qwen2.5:7b",
+    system_prompt=BMO_SYSTEM_PROMPT,
+    timeout=2.0,
+)
+
+try:
+    client.generate_response("Hello BMO")
+except AIError as error:
+    print("Handled correctly:", error)
+'@ | .\.venv\Scripts\python.exe -
+
+
+
+
+.\.venv\Scripts\python.exe main.py
