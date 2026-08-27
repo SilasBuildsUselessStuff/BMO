@@ -19,8 +19,14 @@ from config import (
     OLLAMA_TIMEOUT,
     SERIAL_PORT,
     SERIAL_TIMEOUT,
+    TTS_BMO_PRONUNCIATION,
+    TTS_RATE,
+    TTS_VOICE_NAME,
+    TTS_VOLUME,
     WHISPER_COMPUTE_TYPE,
     WHISPER_DEVICE,
+    WHISPER_HOTWORDS,
+    WHISPER_INITIAL_PROMPT,
     WHISPER_LANGUAGE,
     WHISPER_MODEL,
     WINDOW_HEIGHT,
@@ -31,6 +37,7 @@ from core.assistant import BMOAssistant
 from core.state import BMOState
 from ui.app import BMOApp
 from voice.listener import MicrophoneListener
+from voice.tts import WindowsTTS
 from voice.whisper import WhisperTranscriber
 
 
@@ -61,6 +68,8 @@ def main() -> None:
         device=WHISPER_DEVICE,
         compute_type=WHISPER_COMPUTE_TYPE,
         language=WHISPER_LANGUAGE,
+        initial_prompt=WHISPER_INITIAL_PROMPT,
+        hotwords=WHISPER_HOTWORDS,
     )
 
     # Provider-independent AI implementation backed by local Ollama.
@@ -74,13 +83,23 @@ def main() -> None:
         max_tokens=OLLAMA_MAX_TOKENS,
     )
 
-    # Coordinator for serial, microphone, Whisper, AI, and state.
+    # Temporary local Windows TTS backend. This can later be replaced by a
+    # neural TTS provider without changing the assistant or GUI.
+    tts = WindowsTTS(
+        voice_name=TTS_VOICE_NAME,
+        rate=TTS_RATE,
+        volume=TTS_VOLUME,
+        bmo_pronunciation=TTS_BMO_PRONUNCIATION,
+    )
+
+    # Coordinator for serial, microphone, Whisper, AI, TTS, and state.
     assistant = BMOAssistant(
         state=state,
         connection=connection,
         listener=listener,
         transcriber=transcriber,
         ai_client=ai_client,
+        tts=tts,
     )
 
     root = tk.Tk()
@@ -113,6 +132,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-//.\.venv\Scripts\python.exe -c "from main import main; from core.assistant import BMOAssistant; print('V0.3 integration loaded successfully')"
