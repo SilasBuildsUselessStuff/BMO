@@ -326,7 +326,7 @@ class BMOApp(ttk.Frame):
 
         if snapshot.error_message:
             self.application_error_text.set(
-                f"Voice: {snapshot.error_message}"
+                f"Error: {snapshot.error_message}"
             )
         else:
             self.application_error_text.set("")
