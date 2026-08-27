@@ -221,3 +221,4 @@ class BMOAssistant:
 
         print(f"ESP32: {message}")
 
+//.\.venv\Scripts\python.exe -c "from core.assistant import BMOAssistant; from core.state import BMOState; print('Voice controller loaded successfully')"
