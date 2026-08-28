@@ -705,14 +705,6 @@ bool drawPngFrame(const char* path)
   size_t freeHeap = ESP.getFreeHeap();
   size_t largestBlock = ESP.getMaxAllocHeap();
 
-  Serial.print("PNG size: ");
-  Serial.print(pngSize);
-
-  Serial.print(" | Free heap: ");
-  Serial.print(freeHeap);
-
-  Serial.print(" | Largest block: ");
-  Serial.println(largestBlock);
 
   if (pngSize > largestBlock)
   {
@@ -802,12 +794,10 @@ bool drawCurrentFrame()
     sizeof(framePath)
   );
 
-  Serial.print("Drawing: ");
-  Serial.println(framePath);
-
+  // Do not print every frame during normal operation.
+  // Errors are still reported by drawPngFrame().
   return drawPngFrame(framePath);
 }
-
 // ============================================================
 // VERIFY ANIMATION
 // ============================================================
