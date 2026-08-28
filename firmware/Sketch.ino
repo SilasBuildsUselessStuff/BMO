@@ -637,11 +637,12 @@ void buildFramePath(
 }
 
 // ============================================================
-// DRAW PNG
+// DRAW PNG FRAME DIRECTLY FROM SD
 // ============================================================
 
 bool drawPngFrame(const char* path)
 {
+  // Open the file briefly to verify that it exists and is not empty.
   File pngFile = SD.open(path, FILE_READ);
 
   if (!pngFile)
@@ -652,58 +653,33 @@ bool drawPngFrame(const char* path)
   }
 
   size_t pngSize = pngFile.size();
+  pngFile.close();
 
   if (pngSize == 0)
   {
     Serial.print("FRAME IS EMPTY: ");
     Serial.println(path);
-
-    pngFile.close();
     return false;
   }
 
-  uint8_t* pngBuffer =
-    static_cast<uint8_t*>(malloc(pngSize));
+  // Memory information is useful while diagnosing unusually large frames.
+  Serial.print("PNG size: ");
+  Serial.print(pngSize);
 
-  if (pngBuffer == nullptr)
-  {
-    Serial.print("FRAME MEMORY FAILED: ");
-    Serial.println(path);
+  Serial.print(" | Free heap: ");
+  Serial.print(ESP.getFreeHeap());
 
-    Serial.print("Required bytes: ");
-    Serial.println(pngSize);
+  Serial.print(" | Largest block: ");
+  Serial.println(ESP.getMaxAllocHeap());
 
-    Serial.print("Free heap: ");
-    Serial.println(ESP.getFreeHeap());
-
-    pngFile.close();
-    return false;
-  }
-
-  size_t bytesRead = pngFile.read(
-    pngBuffer,
-    pngSize
-  );
-
-  pngFile.close();
-
-  if (bytesRead != pngSize)
-  {
-    Serial.print("FRAME READ INCOMPLETE: ");
-    Serial.println(path);
-
-    free(pngBuffer);
-    return false;
-  }
-
-  bool drawResult = display.drawPng(
-    pngBuffer,
-    pngSize,
+  // Decode directly from the SD card. This avoids allocating one large
+  // memory block containing the entire compressed PNG file.
+  bool drawResult = display.drawPngFile(
+    SD,
+    path,
     0,
     0
   );
-
-  free(pngBuffer);
 
   if (!drawResult)
   {
@@ -713,25 +689,6 @@ bool drawPngFrame(const char* path)
   }
 
   return true;
-}
-
-bool drawCurrentFrame()
-{
-  Animation* animation = getCurrentAnimation();
-
-  char framePath[96];
-
-  buildFramePath(
-    *animation,
-    currentFrame,
-    framePath,
-    sizeof(framePath)
-  );
-
-  Serial.print("Drawing: ");
-  Serial.println(framePath);
-
-  return drawPngFrame(framePath);
 }
 
 // ============================================================
@@ -1035,12 +992,12 @@ void startPcExpression(
 
   if (!drawCurrentFrame())
   {
-    setupComplete = false;
-
-    showError(
-      "FRAME ERROR",
-      "Could not draw PC expression."
+    Serial.println(
+      "Runtime frame failed; keeping display system active."
     );
+
+    // Skip the failed frame on the next animation update instead of
+    // permanently stopping the complete display system.
   }
 }
 
