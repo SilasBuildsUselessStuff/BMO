@@ -17,9 +17,11 @@ class CurrentWeatherTool:
     """
     Expose current weather as a provider-independent BMO tool.
 
-    The result contains both:
-    - Concise source text for the language model
-    - Structured display data for the future physical WEATHER screen
+    The result contains two separate outputs:
+
+    1. Concise source text for the language model.
+    2. Structured display data for the development GUI and the future
+       physical 480x320 WEATHER screen.
     """
 
     TOOL_NAME = "get_current_weather"
@@ -33,29 +35,90 @@ class CurrentWeatherTool:
         self.weather_service = weather_service
         self.default_location = default_location.strip()
 
+        if not self.default_location:
+            raise ValueError(
+                "The weather tool requires a default location."
+            )
+
+        # Store aliases case-insensitively. For example:
+        #
+        #   "palma de mallorca" -> "Palma, Spain"
+        #   "74746"             -> "Höpfingen, Germany"
+        #
         self.location_aliases = {
             key.strip().casefold(): value.strip()
             for key, value in (location_aliases or {}).items()
+            if key.strip() and value.strip()
         }
 
-    definition()
+    def definition(self) -> ToolDefinition:
+        """
+        Return the generic tool definition registered with BMO.
 
-    def execute(self, arguments: dict[str, Any]) -> ToolResult:
-        """Retrieve current weather and prepare AI and display results."""
+        The instructions explicitly tell the language model to use the
+        configured default instead of asking the user for a location.
+        """
+
+        return ToolDefinition(
+            name=self.TOOL_NAME,
+            description=(
+                "Get live current weather for a location. "
+                f"The configured default location is "
+                f"'{self.default_location}'. "
+                "If the user asks about the weather without naming a "
+                "location, call this tool immediately with an empty "
+                "argument object. Do not ask which location they mean. "
+                "Only use another location when the user explicitly names "
+                "one."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": (
+                            "Optional city or place name, for example "
+                            "'Palma de Mallorca' or 'Berlin, Germany'. "
+                            "Omit this argument when the user does not name "
+                            "a location. The configured default "
+                            f"'{self.default_location}' will then be used."
+                        ),
+                        "default": self.default_location,
+                    }
+                },
+                "required": [],
+            },
+            handler=self.execute,
+        )
+
+    def execute(
+        self,
+        arguments: dict[str, Any],
+    ) -> ToolResult:
+        """
+        Retrieve current weather and prepare AI and display results.
+
+        Missing, null, empty, or whitespace-only location values all use the
+        configured default location.
+        """
 
         supplied_location = arguments.get("location")
 
         if supplied_location is None:
             location_query = self.default_location
+
         elif not isinstance(supplied_location, str):
             raise ToolExecutionError(
                 "The weather location must be text."
             )
+
         elif not supplied_location.strip():
             location_query = self.default_location
+
         else:
             location_query = supplied_location.strip()
 
+        # Resolve known ambiguous names before calling the geocoding API.
         canonical_query = self.location_aliases.get(
             location_query.casefold(),
             location_query,
@@ -68,6 +131,8 @@ class CurrentWeatherTool:
         except WeatherError as error:
             raise ToolExecutionError(str(error)) from error
 
+        # Keep this payload structured. The GUI and ESP32 must never need to
+        # extract data from BMO's generated natural-language sentence.
         display_data = {
             "location": weather.location.display_name,
             "latitude": weather.location.latitude,
@@ -92,132 +157,5 @@ class CurrentWeatherTool:
             display_type="WEATHER",
             display_data=display_data,
         )
-
-
-.\.venv\Scripts\python.exe -m py_compile core\tools.py services\weather_tool.py
-
-
-@'
-from config import (
-    WEATHER_DEFAULT_LOCATION,
-    WEATHER_FORECAST_URL,
-    WEATHER_GEOCODING_URL,
-    WEATHER_LOCATION_ALIASES,
-    WEATHER_TIMEOUT,
-)
-from core.tools import ToolRegistry
-from services.weather import OpenMeteoWeatherService
-from services.weather_tool import CurrentWeatherTool
-
-service = OpenMeteoWeatherService(
-    WEATHER_GEOCODING_URL,
-    WEATHER_FORECAST_URL,
-    WEATHER_TIMEOUT,
-)
-
-weather_tool = CurrentWeatherTool(
-    weather_service=service,
-    default_location=WEATHER_DEFAULT_LOCATION,
-    location_aliases=WEATHER_LOCATION_ALIASES,
-)
-
-registry = ToolRegistry()
-registry.register(weather_tool.definition())
-
-result = registry.execute(
-    "get_current_weather",
-    {},
-)
-
-print("Registered tools:", registry.names)
-print()
-print("AI text:")
-print(result.text)
-print()
-print("Display type:", result.display_type)
-print("Display data:", result.display_data)
-'@ | .\.venv\Scripts\python.exe -
-
-
-
-@'
-from config import (
-    WEATHER_DEFAULT_LOCATION,
-    WEATHER_FORECAST_URL,
-    WEATHER_GEOCODING_URL,
-    WEATHER_LOCATION_ALIASES,
-    WEATHER_TIMEOUT,
-)
-from core.tools import ToolRegistry
-from services.weather import OpenMeteoWeatherService
-from services.weather_tool import CurrentWeatherTool
-
-service = OpenMeteoWeatherService(
-    WEATHER_GEOCODING_URL,
-    WEATHER_FORECAST_URL,
-    WEATHER_TIMEOUT,
-)
-
-tool = CurrentWeatherTool(
-    service,
-    WEATHER_DEFAULT_LOCATION,
-    WEATHER_LOCATION_ALIASES,
-)
-
-registry = ToolRegistry()
-registry.register(tool.definition())
-
-result = registry.execute(
-    "get_current_weather",
-    {
-        "location": "Palma de Mallorca",
-    },
-)
-
-print(result.text)
-print()
-print("Resolved location:", result.display_data["location"])
-print(
-    "Coordinates:",
-    result.display_data["latitude"],
-    result.display_data["longitude"],
-)
-'@ | .\.venv\Scripts\python.exe -
-
-
-
-
-@'
-import json
-
-from config import (
-    WEATHER_DEFAULT_LOCATION,
-    WEATHER_FORECAST_URL,
-    WEATHER_GEOCODING_URL,
-    WEATHER_LOCATION_ALIASES,
-    WEATHER_TIMEOUT,
-)
-from core.tools import ToolRegistry
-from services.weather import OpenMeteoWeatherService
-from services.weather_tool import CurrentWeatherTool
-
-service = OpenMeteoWeatherService(
-    WEATHER_GEOCODING_URL,
-    WEATHER_FORECAST_URL,
-    WEATHER_TIMEOUT,
-)
-
-registry = ToolRegistry()
-registry.register(
-    CurrentWeatherTool(
-        service,
-        WEATHER_DEFAULT_LOCATION,
-        WEATHER_LOCATION_ALIASES,
-    ).definition()
-)
-
-print(json.dumps(registry.ollama_schemas(), indent=2))
-'@ | .\.venv\Scripts\python.exe -
-
 
 
