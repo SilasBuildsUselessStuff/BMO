@@ -1,4 +1,4 @@
-"""Current-weather service using the Open-Meteo APIs."""
+"""Weather service using the Open-Meteo APIs."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -7,7 +7,7 @@ import requests
 
 
 class WeatherError(RuntimeError):
-    """Raised when location or weather information cannot be retrieved."""
+    """Raised when weather information cannot be retrieved."""
 
 
 @dataclass(frozen=True)
@@ -55,11 +55,7 @@ class CurrentWeather:
     wind_speed_kmh: float
 
     def to_tool_text(self) -> str:
-        """
-        Convert the result to concise text suitable for an AI tool result.
-
-        The AI receives measured data rather than being asked to invent it.
-        """
+        """Convert current conditions into concise AI source text."""
 
         return (
             f"Location: {self.location.display_name}\n"
@@ -74,8 +70,51 @@ class CurrentWeather:
         )
 
 
+@dataclass(frozen=True)
+class DailyForecast:
+    """Structured weather forecast for one calendar day."""
+
+    location: LocationResult
+    date: str
+    condition: str
+    weather_code: int
+    temperature_min_c: float
+    temperature_max_c: float
+    precipitation_probability_percent: int
+    precipitation_sum_mm: float
+    wind_speed_max_kmh: float
+    sunrise: str
+    sunset: str
+
+    def to_tool_text(self, day_label: str = "") -> str:
+        """Convert the forecast into concise AI source text."""
+
+        label = day_label.strip()
+
+        if label:
+            forecast_heading = f"Forecast for {label}"
+        else:
+            forecast_heading = "Daily forecast"
+
+        return (
+            f"{forecast_heading}\n"
+            f"Location: {self.location.display_name}\n"
+            f"Date: {self.date} ({self.location.timezone})\n"
+            f"Condition: {self.condition}\n"
+            f"Minimum temperature: {self.temperature_min_c:.1f} °C\n"
+            f"Maximum temperature: {self.temperature_max_c:.1f} °C\n"
+            f"Maximum precipitation probability: "
+            f"{self.precipitation_probability_percent}%\n"
+            f"Expected precipitation: "
+            f"{self.precipitation_sum_mm:.1f} mm\n"
+            f"Maximum wind speed: {self.wind_speed_max_kmh:.1f} km/h\n"
+            f"Sunrise: {self.sunrise}\n"
+            f"Sunset: {self.sunset}"
+        )
+
+
 class OpenMeteoWeatherService:
-    """Retrieve locations and current weather from Open-Meteo."""
+    """Retrieve locations and weather from Open-Meteo."""
 
     def __init__(
         self,
@@ -137,18 +176,17 @@ class OpenMeteoWeatherService:
                 longitude=float(location["longitude"]),
                 timezone=str(location.get("timezone", "auto")),
             )
+
         except (KeyError, TypeError, ValueError) as error:
             raise WeatherError(
                 "The location service returned incomplete data."
             ) from error
 
-    def get_current_weather(self, location_query: str) -> CurrentWeather:
-        """
-        Retrieve current weather for a place name.
-
-        The location is resolved first, so callers can use names such as
-        "Palma de Mallorca" instead of geographic coordinates.
-        """
+    def get_current_weather(
+        self,
+        location_query: str,
+    ) -> CurrentWeather:
+        """Retrieve current conditions for a place name."""
 
         location = self.find_location(location_query)
 
@@ -200,9 +238,141 @@ class OpenMeteoWeatherService:
                 precipitation_mm=float(current["precipitation"]),
                 wind_speed_kmh=float(current["wind_speed_10m"]),
             )
+
         except (KeyError, TypeError, ValueError) as error:
             raise WeatherError(
                 "The weather service returned incomplete conditions."
+            ) from error
+
+    def get_daily_forecast(
+        self,
+        location_query: str,
+        day_offset: int = 1,
+    ) -> DailyForecast:
+        """
+        Retrieve a daily forecast.
+
+        day_offset:
+            0 = today
+            1 = tomorrow
+            2 = the day after tomorrow
+
+        Open-Meteo normally provides several forecast days. This initial
+        implementation accepts offsets from zero through six.
+        """
+
+        if not isinstance(day_offset, int):
+            raise WeatherError(
+                "The forecast day offset must be an integer."
+            )
+
+        if day_offset < 0 or day_offset > 6:
+            raise WeatherError(
+                "Forecasts are currently supported from today "
+                "through six days ahead."
+            )
+
+        location = self.find_location(location_query)
+
+        result = self._get_json(
+            self.forecast_url,
+            params={
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "daily": ",".join(
+                    [
+                        "weather_code",
+                        "temperature_2m_max",
+                        "temperature_2m_min",
+                        "precipitation_probability_max",
+                        "precipitation_sum",
+                        "wind_speed_10m_max",
+                        "sunrise",
+                        "sunset",
+                    ]
+                ),
+                "temperature_unit": "celsius",
+                "wind_speed_unit": "kmh",
+                "precipitation_unit": "mm",
+                "timezone": "auto",
+                "forecast_days": 7,
+            },
+            operation="weather forecast request",
+        )
+
+        daily = result.get("daily")
+
+        if not isinstance(daily, dict):
+            raise WeatherError(
+                "The weather service returned no daily forecast."
+            )
+
+        try:
+            dates = daily["time"]
+            weather_codes = daily["weather_code"]
+            maximum_temperatures = daily["temperature_2m_max"]
+            minimum_temperatures = daily["temperature_2m_min"]
+            precipitation_probabilities = daily[
+                "precipitation_probability_max"
+            ]
+            precipitation_sums = daily["precipitation_sum"]
+            maximum_wind_speeds = daily["wind_speed_10m_max"]
+            sunrises = daily["sunrise"]
+            sunsets = daily["sunset"]
+
+            forecast_values = (
+                dates,
+                weather_codes,
+                maximum_temperatures,
+                minimum_temperatures,
+                precipitation_probabilities,
+                precipitation_sums,
+                maximum_wind_speeds,
+                sunrises,
+                sunsets,
+            )
+
+            if not all(
+                isinstance(values, list)
+                and len(values) > day_offset
+                for values in forecast_values
+            ):
+                raise WeatherError(
+                    "The requested forecast day is unavailable."
+                )
+
+            weather_code = int(weather_codes[day_offset])
+
+            return DailyForecast(
+                location=location,
+                date=str(dates[day_offset]),
+                condition=self.describe_weather_code(weather_code),
+                weather_code=weather_code,
+                temperature_min_c=float(
+                    minimum_temperatures[day_offset]
+                ),
+                temperature_max_c=float(
+                    maximum_temperatures[day_offset]
+                ),
+                precipitation_probability_percent=int(
+                    precipitation_probabilities[day_offset]
+                ),
+                precipitation_sum_mm=float(
+                    precipitation_sums[day_offset]
+                ),
+                wind_speed_max_kmh=float(
+                    maximum_wind_speeds[day_offset]
+                ),
+                sunrise=str(sunrises[day_offset]),
+                sunset=str(sunsets[day_offset]),
+            )
+
+        except WeatherError:
+            raise
+
+        except (KeyError, TypeError, ValueError, IndexError) as error:
+            raise WeatherError(
+                "The weather service returned incomplete forecast data."
             ) from error
 
     def _get_json(
@@ -245,6 +415,7 @@ class OpenMeteoWeatherService:
 
         try:
             result = response.json()
+
         except ValueError as error:
             raise WeatherError(
                 f"The {operation} returned invalid JSON."
@@ -259,11 +430,7 @@ class OpenMeteoWeatherService:
 
     @staticmethod
     def describe_weather_code(code: int) -> str:
-        """
-        Convert a WMO weather interpretation code into plain English.
-
-        Unknown codes remain explicit instead of being guessed.
-        """
+        """Convert a WMO weather code into plain English."""
 
         descriptions = {
             0: "clear sky",
@@ -300,78 +467,3 @@ class OpenMeteoWeatherService:
             code,
             f"unknown weather condition (code {code})",
         )
-
-
-.\.venv\Scripts\python.exe -m py_compile services\weather.py
-
-
-.\.venv\Scripts\python.exe -c "from services.weather import OpenMeteoWeatherService, WeatherError; print('Weather service loaded successfully')"
-
-@'
-from config import (
-    WEATHER_FORECAST_URL,
-    WEATHER_GEOCODING_URL,
-    WEATHER_TIMEOUT,
-)
-from services.weather import OpenMeteoWeatherService
-
-weather = OpenMeteoWeatherService(
-    geocoding_url=WEATHER_GEOCODING_URL,
-    forecast_url=WEATHER_FORECAST_URL,
-    timeout=WEATHER_TIMEOUT,
-)
-
-location = weather.find_location("Palma de Mallorca")
-
-print("Name:", location.name)
-print("Country:", location.country)
-print("Area:", location.administrative_area)
-print("Coordinates:", location.latitude, location.longitude)
-print("Timezone:", location.timezone)
-print("Display name:", location.display_name)
-'@ | .\.venv\Scripts\python.exe -
-
-
-@'
-from config import (
-    WEATHER_FORECAST_URL,
-    WEATHER_GEOCODING_URL,
-    WEATHER_TIMEOUT,
-)
-from services.weather import OpenMeteoWeatherService
-
-weather = OpenMeteoWeatherService(
-    geocoding_url=WEATHER_GEOCODING_URL,
-    forecast_url=WEATHER_FORECAST_URL,
-    timeout=WEATHER_TIMEOUT,
-)
-
-result = weather.get_current_weather("Palma de Mallorca")
-
-print(result.to_tool_text())
-'@ | .\.venv\Scripts\python.exe -
-
-
-@'
-from config import (
-    WEATHER_FORECAST_URL,
-    WEATHER_GEOCODING_URL,
-    WEATHER_TIMEOUT,
-)
-from services.weather import OpenMeteoWeatherService, WeatherError
-
-weather = OpenMeteoWeatherService(
-    WEATHER_GEOCODING_URL,
-    WEATHER_FORECAST_URL,
-    WEATHER_TIMEOUT,
-)
-
-try:
-    weather.get_current_weather(
-        "ThisPlaceShouldDefinitelyNotExist123456"
-    )
-except WeatherError as error:
-    print("Handled correctly:", error)
-'@ | .\.venv\Scripts\python.exe -
-
-
