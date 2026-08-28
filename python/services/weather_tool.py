@@ -218,6 +218,9 @@ class DailyForecastTool:
             name=self.TOOL_NAME,
             description=(
                 "Get a daily weather forecast for today or a future day. "
+                "Always call this tool for every forecast request, even if "
+                "weather was discussed earlier. Never answer a forecast "
+                "from conversation history. "
                 "Use day_offset 0 for today, 1 for tomorrow, 2 for the day "
                 "after tomorrow, and up to 6 for six days ahead. "
                 f"The configured default location is "
