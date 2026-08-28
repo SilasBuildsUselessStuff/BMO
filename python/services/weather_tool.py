@@ -38,32 +38,7 @@ class CurrentWeatherTool:
             for key, value in (location_aliases or {}).items()
         }
 
-    def definition(self) -> ToolDefinition:
-        """Return the generic definition registered with BMO."""
-
-        return ToolDefinition(
-            name=self.TOOL_NAME,
-            description=(
-                "Get live current weather for a location. "
-                "If the user asks about the weather without naming a "
-                "location, omit the location argument so the configured "
-                "default location is used."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": (
-                            "Optional city or place name, for example "
-                            "'Palma de Mallorca' or 'Berlin, Germany'."
-                        ),
-                    }
-                },
-                "required": [],
-            },
-            handler=self.execute,
-        )
+    definition()
 
     def execute(self, arguments: dict[str, Any]) -> ToolResult:
         """Retrieve current weather and prepare AI and display results."""
