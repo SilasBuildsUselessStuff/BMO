@@ -1125,6 +1125,19 @@ void processSerialLine(char* line)
   {
     return;
   }
+  // Normalize optional whitespace after EXPRESSION: so both
+  // "EXPRESSION:TALKING" and "EXPRESSION: TALKING" work.
+  static const String expressionPrefix = "EXPRESSION:";
+
+  if (command.startsWith(expressionPrefix))
+  {
+    String expressionName =
+      command.substring(expressionPrefix.length());
+
+    expressionName.trim();
+
+    command = expressionPrefix + expressionName;
+  }
 
   Serial.print("Normalized command: [");
   Serial.print(command);
