@@ -90,3 +90,16 @@ TTS_VOLUME = 100
 # Text displayed in the GUI remains "BMO", while text sent to the speech
 # engine temporarily uses "Beemo" so it does not say "B M O".
 TTS_BMO_PRONUNCIATION = "Beemo"
+
+# ---------------------------------------------------------------------------
+# Online services
+# ---------------------------------------------------------------------------
+
+# Open-Meteo provides geocoding and weather data without an API key.
+WEATHER_GEOCODING_URL = (
+    "https://geocoding-api.open-meteo.com/v1/search"
+)
+WEATHER_FORECAST_URL = (
+    "https://api.open-meteo.com/v1/forecast"
+)
+WEATHER_TIMEOUT = 10.0
