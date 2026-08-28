@@ -5,6 +5,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include <driver/i2c.h>
+#include <ArduinoJson.h>
 
 // ============================================================
 // DISPLAY CONFIGURATION
