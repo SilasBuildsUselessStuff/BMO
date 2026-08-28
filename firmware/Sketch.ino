@@ -404,7 +404,7 @@ bool setupComplete = false;
 // SERIAL RECEIVE BUFFER
 // ============================================================
 
-static constexpr size_t SERIAL_LINE_BUFFER_SIZE = 1536;
+static constexpr size_t SERIAL_LINE_BUFFER_SIZE = 3072;
 
 char serialLineBuffer[SERIAL_LINE_BUFFER_SIZE];
 size_t serialLineLength = 0;
@@ -1985,17 +1985,39 @@ int readJsonInteger(
 
 bool processScreenDataJson(const char* jsonText)
 {
+  if (jsonText == nullptr)
+  {
+    Serial.println("JSON ERROR: Null input.");
+    return false;
+  }
+
+  size_t jsonLength = strlen(jsonText);
+
+  Serial.print("JSON length: ");
+  Serial.println(jsonLength);
+
+  if (jsonLength == 0)
+  {
+    Serial.println("JSON ERROR: Empty input.");
+    return false;
+  }
+
   JsonDocument document;
 
   DeserializationError error = deserializeJson(
     document,
-    jsonText
+    jsonText,
+    jsonLength
   );
 
   if (error)
   {
     Serial.print("JSON ERROR: ");
     Serial.println(error.c_str());
+
+    Serial.println("Rejected JSON begins:");
+    Serial.println(jsonText);
+
     return false;
   }
 
@@ -2788,7 +2810,7 @@ void setup()
 {
   // Increase RX space for future structured JSON messages.
   Serial.begin(115200); 
-  Serial.setRxBufferSize(2048);
+  Serial.setRxBufferSize(4096);
 
 
   delay(2000);
