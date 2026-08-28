@@ -2282,7 +2282,10 @@ void processSerialLine(char* line)
   {
     Serial.println("Matched command: LISTENING");
 
+    // A new interaction supersedes any previously displayed or pending
+    // information screen. A fresh weather tool result can set pending again.
     weatherScreenActive = false;
+    weatherScreenPending = false;
 
     startPcExpression(
       LISTENING,
