@@ -1540,13 +1540,13 @@ void renderWeatherScreen()
 {
   // Soft BMO-inspired teal/green palette.
   const uint16_t backgroundColor =
-    display.color565(24, 79, 77);
+    display.color565(15, 76, 67);
 
   const uint16_t headerColor =
-    display.color565(45, 139, 126);
+    display.color565(38, 145, 116);
 
   const uint16_t panelColor =
-    display.color565(31, 101, 95);
+    display.color565(22, 103, 86);
 
   const uint16_t textColor =
     display.color565(245, 255, 247);
@@ -1555,7 +1555,7 @@ void renderWeatherScreen()
     display.color565(187, 231, 213);
 
   const uint16_t accentColor =
-    display.color565(245, 221, 105);
+    display.color565(246, 222, 100);
 
   display.fillScreen(backgroundColor);
 
