@@ -1,6 +1,8 @@
 """Central state model for the BMO Companion App."""
 
+from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 from enum import Enum
 from threading import RLock
 
@@ -95,6 +97,8 @@ class BMOStateSnapshot:
     last_user_input: str
     last_bmo_response: str
     error_message: str
+    display_type: str
+    display_data: dict[str, Any]
 
 
 class BMOState:
@@ -120,6 +124,11 @@ class BMOState:
         self._last_user_input = "—"
         self._last_bmo_response = "—"
         self._error_message = ""
+
+            # Structured data produced by tools. This will eventually drive both
+        # the development GUI and the physical BMO display.
+        self._display_type = ""
+        self._display_data: dict[str, Any] = {}
 
     def set_connected(self, connected: bool) -> None:
         """Update the ESP32 connection state."""
@@ -179,6 +188,40 @@ class BMOState:
         with self._lock:
             self._error_message = ""
 
+    def set_tool_display(
+        self,
+        display_type: str,
+        display_data: dict[str, Any],
+    ) -> None:
+        """
+        Store structured information produced by a tool.
+
+        If the display type matches a known BMO screen, that screen becomes
+        active. The data is copied so callers cannot modify central state
+        without acquiring the state lock.
+        """
+
+        cleaned_type = display_type.strip().upper()
+
+        with self._lock:
+            self._display_type = cleaned_type
+            self._display_data = deepcopy(display_data)
+
+            try:
+                self._screen = BMOScreen(cleaned_type)
+            except ValueError:
+                # Unknown future display types may still be stored and shown
+                # by the development GUI.
+                pass
+
+    def clear_tool_display(self) -> None:
+        """Clear the latest structured tool result and return to FACE."""
+
+        with self._lock:
+            self._display_type = ""
+            self._display_data = {}
+            self._screen = BMOScreen.FACE
+    
     def enter_idle(self) -> None:
         """Return BMO to its normal idle state."""
 
@@ -238,4 +281,6 @@ class BMOState:
                 last_user_input=self._last_user_input,
                 last_bmo_response=self._last_bmo_response,
                 error_message=self._error_message,
+                display_type=self._display_type,
+                display_data=deepcopy(self._display_data),
             )
