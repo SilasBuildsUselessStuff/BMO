@@ -4,10 +4,12 @@ from threading import Event, RLock, Thread
 from typing import Optional
 
 import numpy as np
+import json
 
 from ai.client import AIClient, AIError
 from communication.serial import BMOConnection
 from core.state import BMOExpression, BMOState
+from core.tools import ToolResult
 from voice.listener import MicrophoneError, MicrophoneListener
 from voice.tts import TTSError, TTSProvider
 from voice.whisper import TranscriptionError, WhisperTranscriber
@@ -211,18 +213,25 @@ class BMOAssistant:
             if self.ai_client is None:
                 return
 
-            # Stage 2: transcript -> BMO response
-            response = self.ai_client.generate_response(transcript)
+                       # Stage 2: transcript -> BMO response and optional tool results
+            ai_response = self.ai_client.generate_response(transcript)
 
             if self._shutdown_event.is_set():
                 return
 
-            # Store canonical text before preparing or speaking it.
+            response = ai_response.text
+
+            # Store canonical response text before preparing it for TTS.
             self.state.set_last_bmo_response(response)
             self.state.clear_error()
             print(f"BMO: {response}")
 
-            # Keeping TTS optional preserves the text-only V0.3 behavior.
+            # Tool results remain structured. We never extract screen data
+            # from the AI's generated sentence.
+            for tool_result in ai_response.tool_results:
+                self._handle_tool_result(tool_result)
+
+            # Keeping TTS optional preserves text-only operation.
             if self.tts is None:
                 return
 
@@ -270,6 +279,45 @@ class BMOAssistant:
         command = f"EXPRESSION:{expression.value}"
         return self.connection.send_line(command)
 
+    def _handle_tool_result(self, result: ToolResult) -> None:
+        """
+        Store and publish structured information produced by a tool.
+
+        The state copy is consumed by the development GUI. The JSON message
+        prepares the serial protocol for the future physical screen renderer.
+        """
+
+        if not result.display_type:
+            return
+
+        display_type = result.display_type.strip().upper()
+
+        self.state.set_tool_display(
+            display_type=display_type,
+            display_data=result.display_data,
+        )
+
+        payload = {
+            "protocol_version": 1,
+            "type": "screen_data",
+            "screen": display_type,
+            "data": result.display_data,
+        }
+
+        serialized_payload = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+        sent = self.connection.send_line(serialized_payload)
+
+        print(
+            f"Tool display: {display_type} "
+            f"({'sent to ESP32' if sent else 'stored locally'})"
+        )
+        print(f"Display data: {result.display_data}")
+    
     def _on_connection_change(self, connected: bool) -> None:
         """Update central state when serial connectivity changes."""
 
