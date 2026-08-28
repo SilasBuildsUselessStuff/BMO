@@ -637,12 +637,11 @@ void buildFramePath(
 }
 
 // ============================================================
-// DRAW PNG FRAME DIRECTLY FROM SD
+// DRAW PNG FRAME FROM SD
 // ============================================================
 
 bool drawPngFrame(const char* path)
 {
-  // Open briefly to verify that the file exists and is not empty.
   File pngFile = SD.open(path, FILE_READ);
 
   if (!pngFile)
@@ -653,34 +652,90 @@ bool drawPngFrame(const char* path)
   }
 
   size_t pngSize = pngFile.size();
-  pngFile.close();
 
   if (pngSize == 0)
   {
     Serial.print("FRAME IS EMPTY: ");
     Serial.println(path);
+
+    pngFile.close();
     return false;
   }
+
+  // The entire compressed PNG must fit into one contiguous memory block
+  // with this installed LovyanGFX version.
+  size_t freeHeap = ESP.getFreeHeap();
+  size_t largestBlock = ESP.getMaxAllocHeap();
 
   Serial.print("PNG size: ");
   Serial.print(pngSize);
 
   Serial.print(" | Free heap: ");
-  Serial.print(ESP.getFreeHeap());
+  Serial.print(freeHeap);
 
   Serial.print(" | Largest block: ");
-  Serial.println(ESP.getMaxAllocHeap());
+  Serial.println(largestBlock);
 
-  // LovyanGFX has a wrapper for fs::FS, but this installed version does not
-  // recognize the more specific fs::SDFS type returned by SD directly.
-  fs::FS& filesystem = SD;
+  if (pngSize > largestBlock)
+  {
+    Serial.print("PNG TOO LARGE FOR CONTIGUOUS HEAP: ");
+    Serial.println(path);
 
-  bool drawResult = display.drawPngFile(
-    filesystem,
-    path,
+    pngFile.close();
+    return false;
+  }
+
+  uint8_t* pngBuffer =
+    static_cast<uint8_t*>(malloc(pngSize));
+
+  if (pngBuffer == nullptr)
+  {
+    Serial.print("FRAME MEMORY FAILED: ");
+    Serial.println(path);
+
+    Serial.print("Required bytes: ");
+    Serial.println(pngSize);
+
+    Serial.print("Free heap: ");
+    Serial.println(ESP.getFreeHeap());
+
+    Serial.print("Largest block: ");
+    Serial.println(ESP.getMaxAllocHeap());
+
+    pngFile.close();
+    return false;
+  }
+
+  size_t bytesRead = pngFile.read(
+    pngBuffer,
+    pngSize
+  );
+
+  pngFile.close();
+
+  if (bytesRead != pngSize)
+  {
+    Serial.print("FRAME READ INCOMPLETE: ");
+    Serial.println(path);
+
+    Serial.print("Expected bytes: ");
+    Serial.println(pngSize);
+
+    Serial.print("Read bytes: ");
+    Serial.println(bytesRead);
+
+    free(pngBuffer);
+    return false;
+  }
+
+  bool drawResult = display.drawPng(
+    pngBuffer,
+    pngSize,
     0,
     0
   );
+
+  free(pngBuffer);
 
   if (!drawResult)
   {
@@ -691,6 +746,7 @@ bool drawPngFrame(const char* path)
 
   return true;
 }
+
 // ============================================================
 // DRAW CURRENT ANIMATION FRAME
 // ============================================================
