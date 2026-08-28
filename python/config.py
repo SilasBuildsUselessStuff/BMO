@@ -73,6 +73,8 @@ OLLAMA_KEEP_ALIVE = "10m"
 OLLAMA_TEMPERATURE = 0.7
 OLLAMA_MAX_TOKENS = 120
 
+# Prevent a model from requesting tools indefinitely.
+OLLAMA_MAX_TOOL_ROUNDS = 3
 
 # ---------------------------------------------------------------------------
 # Local Windows text-to-speech
