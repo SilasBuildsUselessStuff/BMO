@@ -215,7 +215,7 @@ Animation blinkIdleAnimation = {
   "/assets/blinkidle",
   "blinkidle",
   0,
-  3,
+  2,
   50,
   false
 };
@@ -1583,8 +1583,9 @@ void updateAnimation()
 void setup()
 {
   // Increase RX space for future structured JSON messages.
+  Serial.begin(115200); 
   Serial.setRxBufferSize(2048);
-  Serial.begin(115200);
+
 
   delay(2000);
 
