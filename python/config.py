@@ -95,7 +95,6 @@ TTS_BMO_PRONUNCIATION = "Beemo"
 # Online services
 # ---------------------------------------------------------------------------
 
-# Open-Meteo provides geocoding and weather data without an API key.
 WEATHER_GEOCODING_URL = (
     "https://geocoding-api.open-meteo.com/v1/search"
 )
@@ -104,6 +103,14 @@ WEATHER_FORECAST_URL = (
 )
 WEATHER_TIMEOUT = 10.0
 
-# Default location used when a weather request does not specify a place.
+# Used if no location is supplied.
 WEATHER_DEFAULT_LOCATION = "Höpfingen, Germany"
 WEATHER_DEFAULT_POSTAL_CODE = "74746"
+
+# Canonical queries for known ambiguous location names.
+WEATHER_LOCATION_ALIASES = {
+    "palma de mallorca": "Palma, Spain",
+    "palma, mallorca": "Palma, Spain",
+    "höpfingen": "Höpfingen, Germany",
+    "74746": "Höpfingen, Germany",
+}
