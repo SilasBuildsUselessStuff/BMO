@@ -306,7 +306,8 @@ class BMOAssistant:
 
         serialized_payload = json.dumps(
             payload,
-            ensure_ascii=False,
+            ensure_ascii=True,
+            allow_nan=False,
             separators=(",", ":"),
         )
 
