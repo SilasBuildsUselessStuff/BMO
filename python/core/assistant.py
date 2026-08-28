@@ -311,7 +311,11 @@ class BMOAssistant:
             separators=(",", ":"),
         )
 
-        sent = self.connection.send_line(serialized_payload)
+        sent = self.connection.send_paced_line(
+            serialized_payload,
+            chunk_size=32,
+            chunk_delay=0.03,
+        )
 
         print(
             f"Tool display: {display_type} "
