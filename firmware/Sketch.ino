@@ -1113,49 +1113,133 @@ void setExpressionFromName(const char* expressionName)
 
 void processSerialLine(char* line)
 {
-  if (line[0] == '\0')
+  String command = String(line);
+
+  // Remove spaces, tabs, CR, and other whitespace at both ends.
+  command.trim();
+
+  // Allow lowercase commands from Serial Monitor.
+  command.toUpperCase();
+
+  if (command.length() == 0)
   {
     return;
   }
 
-  Serial.print("Command received: ");
-  Serial.println(line);
+  Serial.print("Normalized command: [");
+  Serial.print(command);
+  Serial.println("]");
 
-  if (strcmp(line, "PING") == 0)
+  if (command == "PING")
   {
     Serial.println("PONG");
     return;
   }
 
-  static const char expressionPrefix[] = "EXPRESSION:";
-
-  if (
-    strncmp(
-      line,
-      expressionPrefix,
-      strlen(expressionPrefix)
-    ) == 0
-  )
+  if (command == "EXPRESSION:IDLE")
   {
-    const char* expressionName =
-      line + strlen(expressionPrefix);
-
-    setExpressionFromName(expressionName);
+    Serial.println("Matched command: IDLE");
+    releasePcExpressionToIdle();
     return;
   }
 
-  if (line[0] == '{')
+  if (command == "EXPRESSION:HAPPY")
   {
-    // The Companion App already sends structured screen JSON.
-    // Parsing and WEATHER rendering will be added in the next firmware step.
+    Serial.println("Matched command: HAPPY");
+    startPcExpression(HAPPY, MODE_PC_HAPPY);
+    return;
+  }
+
+  if (command == "EXPRESSION:HYPED")
+  {
+    Serial.println("Matched command: HYPED");
+    startPcExpression(HYPED, MODE_PC_HAPPY);
+    return;
+  }
+
+  if (command == "EXPRESSION:SURPRISED")
+  {
+    Serial.println("Matched command: SURPRISED");
+    startPcExpression(
+      SURPRISED,
+      MODE_PC_SURPRISED
+    );
+    return;
+  }
+
+  if (command == "EXPRESSION:SLEEPY")
+  {
+    Serial.println("Matched command: SLEEPY");
+    startPcExpression(
+      SLEEPY,
+      MODE_PC_SLEEPY
+    );
+    return;
+  }
+
+  if (command == "EXPRESSION:SLEEPING")
+  {
+    Serial.println("Matched command: SLEEPING");
+    startPcExpression(
+      SLEEPING,
+      MODE_PC_SLEEPING
+    );
+    return;
+  }
+
+  if (command == "EXPRESSION:LISTENING")
+  {
+    Serial.println("Matched command: LISTENING");
+    startPcExpression(
+      LISTENING,
+      MODE_LISTENING
+    );
+    return;
+  }
+
+  if (command == "EXPRESSION:THINKING")
+  {
+    Serial.println("Matched command: THINKING");
+
+    // Temporary mapping until a dedicated thinking animation exists.
+    startPcExpression(
+      THINKING,
+      MODE_THINKING
+    );
+    return;
+  }
+
+  if (command == "EXPRESSION:TALKING")
+  {
+    Serial.println("Matched command: TALKING");
+    startPcExpression(
+      TALKING,
+      MODE_TALKING
+    );
+    return;
+  }
+
+  if (command == "EXPRESSION:MUSIC_ENJOYING")
+  {
+    Serial.println("Matched command: MUSIC_ENJOYING");
+    startPcExpression(
+      MUSIC_ENJOYING,
+      MODE_MUSIC
+    );
+    return;
+  }
+
+  if (command.startsWith("{"))
+  {
     Serial.println(
       "SCREEN_DATA received; JSON renderer not implemented yet."
     );
     return;
   }
 
-  Serial.print("Unknown command: ");
-  Serial.println(line);
+  Serial.print("Unknown command: [");
+  Serial.print(command);
+  Serial.println("]");
 }
 
 void updateSerialInput()
