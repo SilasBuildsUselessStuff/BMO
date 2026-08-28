@@ -292,7 +292,7 @@ Animation listeningAnimation = {
   0,
   13,
   80,
-  false
+  true
 };
 
 Animation thinkingAnimation = {
@@ -301,7 +301,7 @@ Animation thinkingAnimation = {
   0,
   7,
   80,
-  true
+  false
 };
 
 Animation talkingAnimation = {
