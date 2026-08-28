@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from threading import Event, RLock, Thread, current_thread
 from typing import Optional
+from time import sleep
 
 import serial as pyserial
 from serial import SerialException
@@ -143,6 +144,78 @@ class BMOConnection:
             self._stop_event.set()
             return False
 
+    def send_paced_line(
+        self,
+        message: str,
+        chunk_size: int = 32,
+        chunk_delay: float = 0.03,
+    ) -> bool:
+        """
+        Send a newline-terminated message in small chunks.
+
+        The ESP32 can spend significant time decoding and drawing a PNG
+        frame. Sending a large JSON document all at once may overflow its
+        serial receive buffer while the display code is busy.
+
+        Paced transmission is used for structured screen data. Short
+        expression commands continue to use send_line().
+        """
+
+        message = message.strip()
+
+        if not message:
+            return False
+
+        if chunk_size < 1:
+            chunk_size = 1
+
+        if chunk_delay < 0:
+            chunk_delay = 0.0
+
+        with self._connection_lock:
+            connection = self._serial
+            connected = self._connected
+
+        if (
+            not connected
+            or connection is None
+            or not connection.is_open
+        ):
+            return False
+
+        encoded_message = f"{message}\n".encode("utf-8")
+
+        try:
+            # Hold the write lock for the complete message so an expression
+            # command cannot be inserted into the middle of the JSON.
+            with self._write_lock:
+                for offset in range(
+                    0,
+                    len(encoded_message),
+                    chunk_size,
+                ):
+                    chunk = encoded_message[
+                        offset:offset + chunk_size
+                    ]
+
+                    connection.write(chunk)
+                    connection.flush()
+
+                    if (
+                        offset + chunk_size
+                        < len(encoded_message)
+                    ):
+                        sleep(chunk_delay)
+
+            return True
+
+        except (SerialException, OSError) as error:
+            self._record_error(error)
+            self._set_connected(False)
+            self._stop_event.set()
+            return False
+
+    
     def _serial_worker(self) -> None:
         """Connect to the ESP32 and receive messages until stopped."""
 
