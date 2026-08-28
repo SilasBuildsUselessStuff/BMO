@@ -1,40 +1,56 @@
 """Provider-independent AI interface and local Ollama implementation."""
 
+import json
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
 import requests
+
+from core.tools import (
+    ToolExecutionError,
+    ToolRegistry,
+    ToolResult,
+)
 
 
 class AIError(RuntimeError):
     """Raised when an AI response cannot be generated."""
 
 
-class AIClient(ABC):
+@dataclass(frozen=True)
+class AIResponse:
     """
-    Common interface for an AI backend.
+    Complete result of one AI interaction.
 
-    The assistant depends on this interface rather than directly depending
-    on Ollama. Another local or cloud provider can therefore be added later
-    without rewriting the voice and GUI logic.
+    text:
+        The natural-language response shown in the GUI and sent to TTS.
+
+    tool_results:
+        Structured results produced during this interaction. These can later
+        drive the PC development GUI and physical BMO display directly.
     """
+
+    text: str
+    tool_results: tuple[ToolResult, ...] = ()
+
+
+class AIClient(ABC):
+    """Common interface implemented by every AI backend."""
 
     @abstractmethod
-    def generate_response(self, user_text: str) -> str:
-        """Generate BMO's response to one user message."""
+    def generate_response(self, user_text: str) -> AIResponse:
+        """Generate one response, including any structured tool results."""
 
 
 class OllamaClient(AIClient):
     """
     Generate BMO responses through Ollama's local HTTP API.
 
-    A small amount of recent conversation history is retained in memory.
-    This allows BMO to understand follow-up requests such as "another one"
-    and helps prevent repeated responses.
-
-    This is temporary session context, not long-term memory. It disappears
-    when the application closes.
+    Recent conversation history is retained for the current application
+    session. Live tool results are not stored in history because information
+    such as weather becomes stale.
     """
 
     def __init__(
@@ -47,6 +63,8 @@ class OllamaClient(AIClient):
         temperature: float = 0.7,
         max_tokens: int = 120,
         history_turns: int = 6,
+        tool_registry: ToolRegistry | None = None,
+        max_tool_rounds: int = 3,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -56,23 +74,19 @@ class OllamaClient(AIClient):
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-        # One turn consists of one user message and one BMO response.
         self.history_turns = max(0, history_turns)
-        self._history: list[tuple[str, str]] = []
+        self.tool_registry = tool_registry
+        self.max_tool_rounds = max(1, max_tool_rounds)
 
-        # Only one generation should modify conversation history at a time.
+        self._history: list[tuple[str, str]] = []
         self._generation_lock = RLock()
 
-    def generate_response(self, user_text: str) -> str:
+    def generate_response(self, user_text: str) -> AIResponse:
         """
-        Generate a response using Ollama and recent conversation context.
+        Generate BMO's response and execute requested tools.
 
-        This method performs a blocking HTTP request. The BMO assistant calls
-        it from its interaction worker rather than Tkinter's GUI thread.
-
-        Raises:
-            AIError: If the input is empty, Ollama is unavailable, the request
-            fails, or Ollama returns an invalid response.
+        The returned AIResponse keeps natural-language text separate from
+        structured display information.
         """
 
         cleaned_text = user_text.strip()
@@ -82,80 +96,79 @@ class OllamaClient(AIClient):
 
         with self._generation_lock:
             messages = self._build_messages(cleaned_text)
+            tool_results: list[ToolResult] = []
 
-            payload: dict[str, Any] = {
-                "model": self.model,
-                "messages": messages,
-                "stream": False,
-                "keep_alive": self.keep_alive,
-                "options": {
-                    "temperature": self.temperature,
-                    "num_predict": self.max_tokens,
-                },
-            }
+            for _round in range(self.max_tool_rounds + 1):
+                message = self._request_message(messages)
+                tool_calls = message.get("tool_calls")
 
-            try:
-                response = requests.post(
-                    f"{self.base_url}/api/chat",
-                    json=payload,
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
+                if not tool_calls:
+                    content = message.get("content")
 
-            except requests.Timeout as error:
-                raise AIError(
-                    f"Ollama did not respond within "
-                    f"{self.timeout:g} seconds."
-                ) from error
+                    if not isinstance(content, str) or not content.strip():
+                        raise AIError(
+                            "Ollama returned an empty response."
+                        )
 
-            except requests.ConnectionError as error:
-                raise AIError(
-                    "Could not connect to Ollama. "
-                    "Make sure Ollama is running."
-                ) from error
+                    final_text = content.strip()
 
-            except requests.HTTPError as error:
-                detail = self._extract_error_detail(response)
-                raise AIError(
-                    f"Ollama returned an HTTP error: {detail}"
-                ) from error
+                    # Only the user message and final answer are kept in
+                    # conversation history. Live tool data is not retained.
+                    self._history.append(
+                        (cleaned_text, final_text)
+                    )
+                    self._trim_history()
 
-            except requests.RequestException as error:
-                raise AIError(
-                    f"Ollama request failed: {error}"
-                ) from error
+                    return AIResponse(
+                        text=final_text,
+                        tool_results=tuple(tool_results),
+                    )
 
-            try:
-                result = response.json()
-            except ValueError as error:
-                raise AIError(
-                    "Ollama returned a response that was not valid JSON."
-                ) from error
+                if _round >= self.max_tool_rounds:
+                    raise AIError(
+                        "Ollama exceeded the allowed number of tool rounds."
+                    )
 
-            message = result.get("message")
+                if self.tool_registry is None:
+                    raise AIError(
+                        "Ollama requested a tool, but no tool registry "
+                        "is configured."
+                    )
 
-            if not isinstance(message, dict):
-                raise AIError(
-                    "Ollama response did not contain a message."
-                )
+                if not isinstance(tool_calls, list):
+                    raise AIError(
+                        "Ollama returned invalid tool-call data."
+                    )
 
-            content = message.get("content")
+                # Preserve Ollama's assistant tool-call message before adding
+                # the results returned by our Python tools.
+                messages.append(message)
 
-            if not isinstance(content, str):
-                raise AIError(
-                    "Ollama response did not contain valid text."
-                )
+                for tool_call in tool_calls:
+                    tool_name, arguments = self._parse_tool_call(tool_call)
 
-            content = content.strip()
+                    try:
+                        result = self.tool_registry.execute(
+                            tool_name,
+                            arguments,
+                        )
+                        tool_results.append(result)
+                        tool_content = result.text
 
-            if not content:
-                raise AIError("Ollama returned an empty response.")
+                    except ToolExecutionError as error:
+                        # Give the model a controlled error result so it can
+                        # explain the failure naturally to the user.
+                        tool_content = f"Tool error: {error}"
 
-            # Only successful interactions are added to history.
-            self._history.append((cleaned_text, content))
-            self._trim_history()
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "content": tool_content,
+                            "tool_name": tool_name,
+                        }
+                    )
 
-            return content
+            raise AIError("Ollama did not produce a final response.")
 
     def clear_history(self) -> None:
         """Forget all temporary conversation context."""
@@ -170,13 +183,127 @@ class OllamaClient(AIClient):
         with self._generation_lock:
             return len(self._history)
 
+    def _request_message(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Send one chat request to Ollama and return its message."""
+
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.max_tokens,
+            },
+        }
+
+        if self.tool_registry is not None:
+            schemas = self.tool_registry.ollama_schemas()
+
+            if schemas:
+                payload["tools"] = schemas
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/chat",
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+
+        except requests.Timeout as error:
+            raise AIError(
+                f"Ollama did not respond within "
+                f"{self.timeout:g} seconds."
+            ) from error
+
+        except requests.ConnectionError as error:
+            raise AIError(
+                "Could not connect to Ollama. "
+                "Make sure Ollama is running."
+            ) from error
+
+        except requests.HTTPError as error:
+            detail = self._extract_error_detail(response)
+            raise AIError(
+                f"Ollama returned an HTTP error: {detail}"
+            ) from error
+
+        except requests.RequestException as error:
+            raise AIError(
+                f"Ollama request failed: {error}"
+            ) from error
+
+        try:
+            result = response.json()
+        except ValueError as error:
+            raise AIError(
+                "Ollama returned a response that was not valid JSON."
+            ) from error
+
+        message = result.get("message")
+
+        if not isinstance(message, dict):
+            raise AIError(
+                "Ollama response did not contain a message."
+            )
+
+        return message
+
+    @staticmethod
+    def _parse_tool_call(
+        tool_call: Any,
+    ) -> tuple[str, dict[str, Any]]:
+        """Validate one Ollama function call."""
+
+        if not isinstance(tool_call, dict):
+            raise AIError("Ollama returned an invalid tool call.")
+
+        function = tool_call.get("function")
+
+        if not isinstance(function, dict):
+            raise AIError(
+                "Ollama tool call did not contain a function."
+            )
+
+        name = function.get("name")
+        arguments = function.get("arguments", {})
+
+        if not isinstance(name, str) or not name.strip():
+            raise AIError(
+                "Ollama tool call did not contain a valid name."
+            )
+
+        # Depending on the Ollama/model version, arguments may be returned
+        # either as an object or as a JSON-encoded string.
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError as error:
+                raise AIError(
+                    f"Ollama returned invalid arguments for '{name}'."
+                ) from error
+
+        if arguments is None:
+            arguments = {}
+
+        if not isinstance(arguments, dict):
+            raise AIError(
+                f"Ollama returned invalid arguments for '{name}'."
+            )
+
+        return name.strip(), arguments
+
     def _build_messages(
         self,
         current_user_text: str,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """Build the system prompt, recent history, and current message."""
 
-        messages: list[dict[str, str]] = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": self.system_prompt,
@@ -218,7 +345,7 @@ class OllamaClient(AIClient):
 
     @staticmethod
     def _extract_error_detail(response: requests.Response) -> str:
-        """Extract a useful error message from a failed Ollama response."""
+        """Extract a useful message from a failed Ollama response."""
 
         try:
             result = response.json()
@@ -236,19 +363,49 @@ class OllamaClient(AIClient):
         return f"HTTP {response.status_code}"
 
 
-//.\.venv\Scripts\python.exe -m py_compile ai\client.py
 
 
-//@'
+
+
+
+.\.venv\Scripts\python.exe -m py_compile ai\client.py ai\identity.py
+
+
+
+@'
 from ai.client import OllamaClient
 from ai.personality import BMO_SYSTEM_PROMPT
 from config import (
     OLLAMA_BASE_URL,
     OLLAMA_KEEP_ALIVE,
     OLLAMA_MAX_TOKENS,
+    OLLAMA_MAX_TOOL_ROUNDS,
     OLLAMA_MODEL,
     OLLAMA_TEMPERATURE,
     OLLAMA_TIMEOUT,
+    WEATHER_DEFAULT_LOCATION,
+    WEATHER_FORECAST_URL,
+    WEATHER_GEOCODING_URL,
+    WEATHER_LOCATION_ALIASES,
+    WEATHER_TIMEOUT,
+)
+from core.tools import ToolRegistry
+from services.weather import OpenMeteoWeatherService
+from services.weather_tool import CurrentWeatherTool
+
+weather_service = OpenMeteoWeatherService(
+    WEATHER_GEOCODING_URL,
+    WEATHER_FORECAST_URL,
+    WEATHER_TIMEOUT,
+)
+
+registry = ToolRegistry()
+registry.register(
+    CurrentWeatherTool(
+        weather_service=weather_service,
+        default_location=WEATHER_DEFAULT_LOCATION,
+        location_aliases=WEATHER_LOCATION_ALIASES,
+    ).definition()
 )
 
 client = OllamaClient(
@@ -259,17 +416,120 @@ client = OllamaClient(
     keep_alive=OLLAMA_KEEP_ALIVE,
     temperature=OLLAMA_TEMPERATURE,
     max_tokens=OLLAMA_MAX_TOKENS,
+    tool_registry=registry,
+    max_tool_rounds=OLLAMA_MAX_TOOL_ROUNDS,
 )
 
-messages = [
-    "Tell me a short joke.",
-    "Tell me another one. Do not repeat the previous joke.",
-    "One more different joke, please.",
-]
+response = client.generate_response(
+    "What is the weather right now?"
+)
 
-for message in messages:
+print("BMO:", response.text)
+print("Tool results:", len(response.tool_results))
+
+for result in response.tool_results:
     print()
-    print("You:", message)
-    print("BMO:", client.generate_response(message))
-    print("Stored exchanges:", client.history_size)
+    print("Display type:", result.display_type)
+    print("Display data:", result.display_data)
+'@ | .\.venv\Scripts\python.exe -
+
+
+
+
+
+@'
+from ai.client import OllamaClient
+from ai.personality import BMO_SYSTEM_PROMPT
+from config import *
+from core.tools import ToolRegistry
+from services.weather import OpenMeteoWeatherService
+from services.weather_tool import CurrentWeatherTool
+
+service = OpenMeteoWeatherService(
+    WEATHER_GEOCODING_URL,
+    WEATHER_FORECAST_URL,
+    WEATHER_TIMEOUT,
+)
+
+registry = ToolRegistry()
+registry.register(
+    CurrentWeatherTool(
+        service,
+        WEATHER_DEFAULT_LOCATION,
+        WEATHER_LOCATION_ALIASES,
+    ).definition()
+)
+
+client = OllamaClient(
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    BMO_SYSTEM_PROMPT,
+    OLLAMA_TIMEOUT,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_TEMPERATURE,
+    OLLAMA_MAX_TOKENS,
+    tool_registry=registry,
+    max_tool_rounds=OLLAMA_MAX_TOOL_ROUNDS,
+)
+
+response = client.generate_response(
+    "What is the current weather in Palma de Mallorca?"
+)
+
+print("BMO:", response.text)
+
+weather_data = response.tool_results[0].display_data
+print("Resolved:", weather_data["location"])
+print(
+    "Coordinates:",
+    weather_data["latitude"],
+    weather_data["longitude"],
+)
+'@ | .\.venv\Scripts\python.exe -
+
+
+
+
+
+@'
+from ai.client import OllamaClient
+from ai.personality import BMO_SYSTEM_PROMPT
+from config import *
+from core.tools import ToolRegistry
+from services.weather import OpenMeteoWeatherService
+from services.weather_tool import CurrentWeatherTool
+
+service = OpenMeteoWeatherService(
+    WEATHER_GEOCODING_URL,
+    WEATHER_FORECAST_URL,
+    WEATHER_TIMEOUT,
+)
+
+registry = ToolRegistry()
+registry.register(
+    CurrentWeatherTool(
+        service,
+        WEATHER_DEFAULT_LOCATION,
+        WEATHER_LOCATION_ALIASES,
+    ).definition()
+)
+
+client = OllamaClient(
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+    BMO_SYSTEM_PROMPT,
+    OLLAMA_TIMEOUT,
+    OLLAMA_KEEP_ALIVE,
+    OLLAMA_TEMPERATURE,
+    OLLAMA_MAX_TOKENS,
+    tool_registry=registry,
+    max_tool_rounds=OLLAMA_MAX_TOOL_ROUNDS,
+)
+
+response = client.generate_response(
+    "Tell me a tiny joke."
+)
+
+print("BMO:", response.text)
+print("Tool results:", len(response.tool_results))
 '@ | .\.venv\Scripts\python.exe -
