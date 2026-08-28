@@ -1,110 +1,3 @@
-enum Screen {
-  FACE,
-  WEATHER,
-  SPOTIFY,
-  TODO_SCREEN,
-  CLOCK,
-  GAMES,
-  CHANCE,
-  ANIMATION,
-  SETTINGS,
-  SYSTEM_INFORMATION,
-  NOTIFICATION_SCREEN,
-  LOW_BATTERY_SCREEN
-};
-
-enum Expression {
-  IDLE,
-  HAPPY,
-  SAD,
-  CONCERNED,
-  ANGRY,
-  SURPRISED,
-  SLEEPY,
-  SLEEPING,
-  HYPED,
-  DETECTIVE,
-  MUSIC_ENJOYING,
-  LISTENING,
-  THINKING,
-  TALKING,
-  LOW_BATTERY,
-  CONFUSED
-};
-
-Screen currentScreen = FACE;
-
-Expression defaultExpression = HAPPY;
-Expression currentExpression = HAPPY;
-
-unsigned long expressionStartTime = 0;
-unsigned long expressionDuration = 0;
-
-bool expressionTimerActive = false;
-
-const char* getScreenName(Screen screen)
-{
-  switch(screen)
-  {
-    case FACE: return "FACE";
-    case WEATHER: return "WEATHER";
-    case SPOTIFY: return "SPOTIFY";
-    case TODO_SCREEN: return "TODO";
-    case CLOCK: return "CLOCK";
-    case GAMES: return "GAMES";
-    case CHANCE: return "CHANCE";
-    case ANIMATION: return "ANIMATION";
-    case SETTINGS: return "SETTINGS";
-    case SYSTEM_INFORMATION: return "SYSTEM_INFORMATION";
-    case NOTIFICATION_SCREEN: return "NOTIFICATION_SCREEN";
-    case LOW_BATTERY_SCREEN: return "LOW_BATTERY_SCREEN";
-  }
-
-  return "UNKNOWN";
-}
-
-const char* getExpressionName(Expression expression)
-{
-  switch(expression)
-  {
-    case IDLE: return "IDLE";
-    case HAPPY: return "HAPPY";
-    case SAD: return "SAD";
-    case CONCERNED: return "CONCERNED";
-    case ANGRY: return "ANGRY";
-    case SURPRISED: return "SURPRISED";
-    case SLEEPY: return "SLEEPY";
-    case SLEEPING: return "SLEEPING";
-    case HYPED: return "HYPED";
-    case DETECTIVE: return "DETECTIVE";
-    case MUSIC_ENJOYING: return "MUSIC_ENJOYING";
-    case LISTENING: return "LISTENING";
-    case THINKING: return "THINKING";
-    case TALKING: return "TALKING";
-    case LOW_BATTERY: return "LOW_BATTERY";
-    case CONFUSED: return "CONFUSED";
-  }
-
-  return "UNKNOWN";
-}
-
-void printCurrentState()
-{
-  Serial.print("Screen: ");
-  Serial.print(getScreenName(currentScreen));
-
-  Serial.print(" | Expression: ");
-  Serial.println(getExpressionName(currentExpression));
-}
-
-void setExpression(Expression expression, unsigned long durationMs)
-{
-  currentExpression = expression;
-
-  expressionStartTime = millis();
-  expressionDuration = durationMs;
-
-  expressionTimerActive = true;
 #define LGFX_USE_V1
 
 #include <Arduino.h>
@@ -151,7 +44,7 @@ public:
       panel.setBus(&bus);
     }
 
-    // ST7796 display panel
+    // ST7796 panel
     {
       auto cfg = panel.config();
 
@@ -178,7 +71,7 @@ public:
       panel.config(cfg);
     }
 
-    // Display backlight
+    // Backlight
     {
       auto cfg = backlight.config();
 
@@ -191,43 +84,43 @@ public:
       panel.setLight(&backlight);
     }
 
-    // Capacitive touch controller
-{
-  auto cfg = touch.config();
+    // GT911 touch controller
+    {
+      auto cfg = touch.config();
 
-  cfg.pin_int = GPIO_NUM_36;
-  cfg.pin_sda = GPIO_NUM_33;
-  cfg.pin_scl = GPIO_NUM_32;
+      cfg.pin_int = GPIO_NUM_36;
+      cfg.pin_sda = GPIO_NUM_33;
+      cfg.pin_scl = GPIO_NUM_32;
 
-  cfg.i2c_addr = 0x5D;
-  cfg.i2c_port = I2C_NUM_0;
-  cfg.freq = 800000;
+      cfg.i2c_addr = 0x5D;
+      cfg.i2c_port = I2C_NUM_0;
+      cfg.freq = 800000;
 
-  cfg.x_min = 14;
-  cfg.x_max = 310;
-  cfg.y_min = 5;
-  cfg.y_max = 448;
+      cfg.x_min = 14;
+      cfg.x_max = 310;
+      cfg.y_min = 5;
+      cfg.y_max = 448;
 
-  cfg.offset_rotation = 0;
-  cfg.bus_shared = false;
+      cfg.offset_rotation = 0;
+      cfg.bus_shared = false;
 
-  touch.config(cfg);
-  panel.setTouch(&touch);
-}
+      touch.config(cfg);
+      panel.setTouch(&touch);
+    }
 
     setPanel(&panel);
   }
 };
 
 // ============================================================
-// HARDWARE OBJECTS
+// HARDWARE
 // ============================================================
 
 LGFX display;
 SPIClass SDSPI(VSPI);
 
 // ============================================================
-// SD CARD CONFIGURATION
+// SD CARD
 // ============================================================
 
 static constexpr int SD_CS = 5;
@@ -236,10 +129,57 @@ static constexpr int SD_MISO = 19;
 static constexpr int SD_MOSI = 23;
 
 // ============================================================
+// BMO STATE
 // ============================================================
-// ANIMATION DEFINITIONS
+
+enum Screen
+{
+  FACE,
+  WEATHER,
+  SPOTIFY,
+  TODO_SCREEN,
+  CLOCK,
+  GAMES,
+  CHANCE,
+  ANIMATION,
+  SETTINGS,
+  SYSTEM_INFORMATION,
+  NOTIFICATION_SCREEN,
+  LOW_BATTERY_SCREEN
+};
+
+enum Expression
+{
+  IDLE,
+  HAPPY,
+  SAD,
+  CONCERNED,
+  ANGRY,
+  SURPRISED,
+  SLEEPY,
+  SLEEPING,
+  HYPED,
+  DETECTIVE,
+  MUSIC_ENJOYING,
+  LISTENING,
+  THINKING,
+  TALKING,
+  LOW_BATTERY,
+  CONFUSED
+};
+
+Screen currentScreen = FACE;
+Expression currentExpression = IDLE;
+
+// True while the Windows Companion App controls the expression.
+bool pcExpressionActive = false;
+
+// ============================================================
+// ANIMATION DEFINITION
 //
-// highestFrame is inclusive because numbering begins at 0000.
+// highestFrame is inclusive.
+// Example:
+// /assets/idle/idle0000.png
 // ============================================================
 
 struct Animation
@@ -252,8 +192,8 @@ struct Animation
   bool pingPong;
 };
 
-Animation bootingAnimation =
-{
+// Autonomous animations
+Animation bootingAnimation = {
   "/assets/booting",
   "booting",
   0,
@@ -262,8 +202,7 @@ Animation bootingAnimation =
   false
 };
 
-Animation idleAnimation =
-{
+Animation idleAnimation = {
   "/assets/idle",
   "idle",
   0,
@@ -272,18 +211,16 @@ Animation idleAnimation =
   true
 };
 
-Animation blinkIdleAnimation =
-{
+Animation blinkIdleAnimation = {
   "/assets/blinkidle",
   "blinkidle",
   0,
-  2,
+  3,
   50,
   false
 };
 
-Animation lookIdleAnimation =
-{
+Animation lookIdleAnimation = {
   "/assets/lookidle",
   "lookidle",
   0,
@@ -292,18 +229,16 @@ Animation lookIdleAnimation =
   false
 };
 
-Animation surprisedAnimation =
-{
+Animation surprisedAnimation = {
   "/assets/surprised",
   "surprised",
   0,
-  3,
+  1,
   50,
   false
 };
 
-Animation smileAnimation =
-{
+Animation smileAnimation = {
   "/assets/smile",
   "smile",
   0,
@@ -312,8 +247,7 @@ Animation smileAnimation =
   true
 };
 
-Animation blinkSmileAnimation =
-{
+Animation blinkSmileAnimation = {
   "/assets/blinksmile",
   "blinksmile",
   0,
@@ -322,8 +256,7 @@ Animation blinkSmileAnimation =
   false
 };
 
-Animation lookSmileAnimation =
-{
+Animation lookSmileAnimation = {
   "/assets/looksmile",
   "looksmile",
   0,
@@ -332,8 +265,7 @@ Animation lookSmileAnimation =
   false
 };
 
-Animation tiredAnimation =
-{
+Animation tiredAnimation = {
   "/assets/tired",
   "tired",
   0,
@@ -342,13 +274,50 @@ Animation tiredAnimation =
   true
 };
 
-Animation sleepingAnimation =
-{
+Animation sleepingAnimation = {
   "/assets/sleeping",
   "sleeping",
   0,
-  17,
+  16,
   120,
+  true
+};
+
+// Companion App expression animations
+Animation listeningAnimation = {
+  "/assets/listening",
+  "listening",
+  0,
+  13,
+  80,
+  true
+};
+
+Animation talkingAnimation = {
+  "/assets/talking",
+  "talking",
+  0,
+  8,
+  80,
+  true
+};
+
+Animation musicAnimation = {
+  "/assets/music",
+  "music",
+  0,
+  8,
+  80,
+  true
+};
+
+// Available for a later screensaver feature.
+Animation ballBounceAnimation = {
+  "/assets/screensaver",
+  "ballbounce",
+  0,
+  17,
+  80,
   true
 };
 
@@ -356,17 +325,10 @@ Animation sleepingAnimation =
 // BEHAVIOR TIMINGS
 // ============================================================
 
-static constexpr unsigned long SMILE_DURATION_MS =
-  60000UL;
-
-static constexpr unsigned long IDLE_TO_TIRED_MS =
-  120000UL;
-
-static constexpr unsigned long TIRED_TO_SLEEPING_MS =
-  60000UL;
-
-static constexpr unsigned long TOUCH_DEBOUNCE_MS =
-  250UL;
+static constexpr unsigned long SMILE_DURATION_MS = 60000UL;
+static constexpr unsigned long IDLE_TO_TIRED_MS = 120000UL;
+static constexpr unsigned long TIRED_TO_SLEEPING_MS = 60000UL;
+static constexpr unsigned long TOUCH_DEBOUNCE_MS = 250UL;
 
 // ============================================================
 // ANIMATION MODES
@@ -376,18 +338,27 @@ enum AnimationMode
 {
   MODE_BOOTING,
 
+  // Autonomous modes
   MODE_IDLE,
   MODE_BLINK_IDLE,
   MODE_LOOK_IDLE,
-
   MODE_SURPRISED,
-
   MODE_SMILE,
   MODE_BLINK_SMILE,
   MODE_LOOK_SMILE,
-
   MODE_TIRED,
-  MODE_SLEEPING
+  MODE_SLEEPING,
+
+  // Companion App controlled modes
+  MODE_PC_IDLE,
+  MODE_PC_HAPPY,
+  MODE_PC_SURPRISED,
+  MODE_PC_SLEEPY,
+  MODE_PC_SLEEPING,
+  MODE_LISTENING,
+  MODE_THINKING,
+  MODE_TALKING,
+  MODE_MUSIC
 };
 
 AnimationMode currentMode = MODE_BOOTING;
@@ -416,6 +387,132 @@ unsigned long lastTouchAt = 0;
 
 bool previousTouchState = false;
 bool setupComplete = false;
+
+// ============================================================
+// SERIAL RECEIVE BUFFER
+// ============================================================
+
+static constexpr size_t SERIAL_LINE_BUFFER_SIZE = 1536;
+
+char serialLineBuffer[SERIAL_LINE_BUFFER_SIZE];
+size_t serialLineLength = 0;
+bool serialLineOverflow = false;
+
+// ============================================================
+// NAMES
+// ============================================================
+
+const char* getScreenName(Screen screen)
+{
+  switch (screen)
+  {
+    case FACE:
+      return "FACE";
+
+    case WEATHER:
+      return "WEATHER";
+
+    case SPOTIFY:
+      return "SPOTIFY";
+
+    case TODO_SCREEN:
+      return "TODO";
+
+    case CLOCK:
+      return "CLOCK";
+
+    case GAMES:
+      return "GAMES";
+
+    case CHANCE:
+      return "CHANCE";
+
+    case ANIMATION:
+      return "ANIMATION";
+
+    case SETTINGS:
+      return "SETTINGS";
+
+    case SYSTEM_INFORMATION:
+      return "SYSTEM_INFORMATION";
+
+    case NOTIFICATION_SCREEN:
+      return "NOTIFICATION_SCREEN";
+
+    case LOW_BATTERY_SCREEN:
+      return "LOW_BATTERY_SCREEN";
+  }
+
+  return "UNKNOWN";
+}
+
+const char* getExpressionName(Expression expression)
+{
+  switch (expression)
+  {
+    case IDLE:
+      return "IDLE";
+
+    case HAPPY:
+      return "HAPPY";
+
+    case SAD:
+      return "SAD";
+
+    case CONCERNED:
+      return "CONCERNED";
+
+    case ANGRY:
+      return "ANGRY";
+
+    case SURPRISED:
+      return "SURPRISED";
+
+    case SLEEPY:
+      return "SLEEPY";
+
+    case SLEEPING:
+      return "SLEEPING";
+
+    case HYPED:
+      return "HYPED";
+
+    case DETECTIVE:
+      return "DETECTIVE";
+
+    case MUSIC_ENJOYING:
+      return "MUSIC_ENJOYING";
+
+    case LISTENING:
+      return "LISTENING";
+
+    case THINKING:
+      return "THINKING";
+
+    case TALKING:
+      return "TALKING";
+
+    case LOW_BATTERY:
+      return "LOW_BATTERY";
+
+    case CONFUSED:
+      return "CONFUSED";
+  }
+
+  return "UNKNOWN";
+}
+
+void printCurrentState()
+{
+  Serial.print("STATE Screen: ");
+  Serial.print(getScreenName(currentScreen));
+
+  Serial.print(" | Expression: ");
+  Serial.print(getExpressionName(currentExpression));
+
+  Serial.print(" | PC control: ");
+  Serial.println(pcExpressionActive ? "yes" : "no");
+}
 
 // ============================================================
 // ERROR SCREEN
@@ -462,18 +559,23 @@ Animation* getCurrentAnimation()
       return &bootingAnimation;
 
     case MODE_IDLE:
+    case MODE_PC_IDLE:
       return &idleAnimation;
 
     case MODE_BLINK_IDLE:
       return &blinkIdleAnimation;
 
     case MODE_LOOK_IDLE:
+    case MODE_THINKING:
+      // Temporary THINKING animation until a dedicated folder exists.
       return &lookIdleAnimation;
 
     case MODE_SURPRISED:
+    case MODE_PC_SURPRISED:
       return &surprisedAnimation;
 
     case MODE_SMILE:
+    case MODE_PC_HAPPY:
       return &smileAnimation;
 
     case MODE_BLINK_SMILE:
@@ -483,20 +585,28 @@ Animation* getCurrentAnimation()
       return &lookSmileAnimation;
 
     case MODE_TIRED:
+    case MODE_PC_SLEEPY:
       return &tiredAnimation;
 
     case MODE_SLEEPING:
+    case MODE_PC_SLEEPING:
       return &sleepingAnimation;
+
+    case MODE_LISTENING:
+      return &listeningAnimation;
+
+    case MODE_TALKING:
+      return &talkingAnimation;
+
+    case MODE_MUSIC:
+      return &musicAnimation;
   }
 
   return &idleAnimation;
 }
 
 // ============================================================
-// BUILD FRAME PATH
-//
-// Example:
-// /assets/idle/idle0003.png
+// FRAME PATH
 // ============================================================
 
 void buildFramePath(
@@ -517,7 +627,7 @@ void buildFramePath(
 }
 
 // ============================================================
-// DRAW PNG FRAME FROM SD
+// DRAW PNG
 // ============================================================
 
 bool drawPngFrame(const char* path)
@@ -589,16 +699,11 @@ bool drawPngFrame(const char* path)
   {
     Serial.print("FRAME DECODE FAILED: ");
     Serial.println(path);
-
     return false;
   }
 
   return true;
 }
-
-// ============================================================
-// DRAW CURRENT FRAME
-// ============================================================
 
 bool drawCurrentFrame()
 {
@@ -717,25 +822,61 @@ void scheduleSmileEventsIfNeeded()
 }
 
 // ============================================================
-// START AND RESUME MODES
+// MODE HELPERS
+// ============================================================
+
+void initializeModeFrame(AnimationMode mode)
+{
+  currentMode = mode;
+
+  Animation* animation = getCurrentAnimation();
+
+  currentFrame = animation->firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+}
+
+bool isPcLoopingMode(AnimationMode mode)
+{
+  switch (mode)
+  {
+    case MODE_PC_IDLE:
+    case MODE_PC_HAPPY:
+    case MODE_PC_SURPRISED:
+    case MODE_PC_SLEEPY:
+    case MODE_PC_SLEEPING:
+    case MODE_LISTENING:
+    case MODE_THINKING:
+    case MODE_TALKING:
+    case MODE_MUSIC:
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+// ============================================================
+// AUTONOMOUS MODES
 // ============================================================
 
 void startBooting()
 {
-  currentMode = MODE_BOOTING;
-  currentFrame = bootingAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  pcExpressionActive = false;
+  currentExpression = IDLE;
+
+  initializeModeFrame(MODE_BOOTING);
 
   Serial.println("Animation: BOOTING");
 }
 
 void startFreshIdle()
 {
-  currentMode = MODE_IDLE;
-  currentFrame = idleAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  pcExpressionActive = false;
+  currentScreen = FACE;
+  currentExpression = IDLE;
+
+  initializeModeFrame(MODE_IDLE);
 
   nextBlinkAt = 0;
   nextLookAt = 0;
@@ -747,11 +888,9 @@ void startFreshIdle()
 
 void resumeIdle()
 {
-  currentMode = MODE_IDLE;
-  currentFrame = idleAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = IDLE;
 
+  initializeModeFrame(MODE_IDLE);
   scheduleIdleEventsIfNeeded();
 
   Serial.println("Animation: IDLE");
@@ -759,11 +898,9 @@ void resumeIdle()
 
 void startBlinkIdle()
 {
-  currentMode = MODE_BLINK_IDLE;
-  currentFrame = blinkIdleAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = IDLE;
 
+  initializeModeFrame(MODE_BLINK_IDLE);
   nextBlinkAt = 0;
 
   Serial.println("Animation: BLINK IDLE");
@@ -771,11 +908,9 @@ void startBlinkIdle()
 
 void startLookIdle()
 {
-  currentMode = MODE_LOOK_IDLE;
-  currentFrame = lookIdleAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = IDLE;
 
+  initializeModeFrame(MODE_LOOK_IDLE);
   nextLookAt = 0;
 
   Serial.println("Animation: LOOK IDLE");
@@ -783,10 +918,9 @@ void startLookIdle()
 
 void startSurprised()
 {
-  currentMode = MODE_SURPRISED;
-  currentFrame = surprisedAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = SURPRISED;
+
+  initializeModeFrame(MODE_SURPRISED);
 
   nextBlinkAt = 0;
   nextLookAt = 0;
@@ -796,10 +930,9 @@ void startSurprised()
 
 void startSmileSession()
 {
-  currentMode = MODE_SMILE;
-  currentFrame = smileAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = HAPPY;
+
+  initializeModeFrame(MODE_SMILE);
 
   smileUntil = millis() + SMILE_DURATION_MS;
 
@@ -813,11 +946,9 @@ void startSmileSession()
 
 void resumeSmile()
 {
-  currentMode = MODE_SMILE;
-  currentFrame = smileAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = HAPPY;
 
+  initializeModeFrame(MODE_SMILE);
   scheduleSmileEventsIfNeeded();
 
   Serial.println("Animation: SMILE");
@@ -825,11 +956,9 @@ void resumeSmile()
 
 void startBlinkSmile()
 {
-  currentMode = MODE_BLINK_SMILE;
-  currentFrame = blinkSmileAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = HAPPY;
 
+  initializeModeFrame(MODE_BLINK_SMILE);
   nextBlinkAt = 0;
 
   Serial.println("Animation: BLINK SMILE");
@@ -837,11 +966,9 @@ void startBlinkSmile()
 
 void startLookSmile()
 {
-  currentMode = MODE_LOOK_SMILE;
-  currentFrame = lookSmileAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = HAPPY;
 
+  initializeModeFrame(MODE_LOOK_SMILE);
   nextLookAt = 0;
 
   Serial.println("Animation: LOOK SMILE");
@@ -849,10 +976,9 @@ void startLookSmile()
 
 void startTired()
 {
-  currentMode = MODE_TIRED;
-  currentFrame = tiredAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = SLEEPY;
+
+  initializeModeFrame(MODE_TIRED);
 
   tiredStartedAt = millis();
 
@@ -864,10 +990,9 @@ void startTired()
 
 void startSleeping()
 {
-  currentMode = MODE_SLEEPING;
-  currentFrame = sleepingAnimation.firstFrame;
-  frameDirection = 1;
-  lastFrameAt = millis();
+  currentExpression = SLEEPING;
+
+  initializeModeFrame(MODE_SLEEPING);
 
   nextBlinkAt = 0;
   nextLookAt = 0;
@@ -876,7 +1001,215 @@ void startSleeping()
 }
 
 // ============================================================
-// TOUCH HANDLING
+// PC-CONTROLLED EXPRESSIONS
+// ============================================================
+
+void startPcExpression(
+  Expression expression,
+  AnimationMode mode
+)
+{
+  pcExpressionActive = true;
+  currentScreen = FACE;
+  currentExpression = expression;
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  initializeModeFrame(mode);
+
+  Serial.print("PC expression: ");
+  Serial.println(getExpressionName(expression));
+
+  printCurrentState();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not draw PC expression."
+    );
+  }
+}
+
+void releasePcExpressionToIdle()
+{
+  Serial.println("PC expression released to autonomous IDLE.");
+
+  lastInteractionAt = millis();
+  startFreshIdle();
+  printCurrentState();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not return to idle."
+    );
+  }
+}
+
+void setExpressionFromName(const char* expressionName)
+{
+  if (strcmp(expressionName, "IDLE") == 0)
+  {
+    releasePcExpressionToIdle();
+  }
+  else if (
+    strcmp(expressionName, "HAPPY") == 0 ||
+    strcmp(expressionName, "HYPED") == 0
+  )
+  {
+    startPcExpression(HAPPY, MODE_PC_HAPPY);
+  }
+  else if (strcmp(expressionName, "SURPRISED") == 0)
+  {
+    startPcExpression(SURPRISED, MODE_PC_SURPRISED);
+  }
+  else if (strcmp(expressionName, "SLEEPY") == 0)
+  {
+    startPcExpression(SLEEPY, MODE_PC_SLEEPY);
+  }
+  else if (strcmp(expressionName, "SLEEPING") == 0)
+  {
+    startPcExpression(SLEEPING, MODE_PC_SLEEPING);
+  }
+  else if (strcmp(expressionName, "LISTENING") == 0)
+  {
+    startPcExpression(LISTENING, MODE_LISTENING);
+  }
+  else if (strcmp(expressionName, "THINKING") == 0)
+  {
+    // Uses lookidle until a dedicated thinking animation exists.
+    startPcExpression(THINKING, MODE_THINKING);
+  }
+  else if (strcmp(expressionName, "TALKING") == 0)
+  {
+    startPcExpression(TALKING, MODE_TALKING);
+  }
+  else if (strcmp(expressionName, "MUSIC_ENJOYING") == 0)
+  {
+    startPcExpression(MUSIC_ENJOYING, MODE_MUSIC);
+  }
+  else
+  {
+    // Expressions without dedicated assets currently use a protected idle
+    // animation. They still remain under PC control, so autonomous events
+    // cannot interrupt them.
+    Serial.print("No dedicated animation for expression: ");
+    Serial.println(expressionName);
+
+    startPcExpression(IDLE, MODE_PC_IDLE);
+  }
+}
+
+// ============================================================
+// SERIAL COMMAND HANDLING
+// ============================================================
+
+void processSerialLine(char* line)
+{
+  if (line[0] == '\0')
+  {
+    return;
+  }
+
+  Serial.print("Command received: ");
+  Serial.println(line);
+
+  if (strcmp(line, "PING") == 0)
+  {
+    Serial.println("PONG");
+    return;
+  }
+
+  static const char expressionPrefix[] = "EXPRESSION:";
+
+  if (
+    strncmp(
+      line,
+      expressionPrefix,
+      strlen(expressionPrefix)
+    ) == 0
+  )
+  {
+    const char* expressionName =
+      line + strlen(expressionPrefix);
+
+    setExpressionFromName(expressionName);
+    return;
+  }
+
+  if (line[0] == '{')
+  {
+    // The Companion App already sends structured screen JSON.
+    // Parsing and WEATHER rendering will be added in the next firmware step.
+    Serial.println(
+      "SCREEN_DATA received; JSON renderer not implemented yet."
+    );
+    return;
+  }
+
+  Serial.print("Unknown command: ");
+  Serial.println(line);
+}
+
+void updateSerialInput()
+{
+  while (Serial.available() > 0)
+  {
+    char incoming = static_cast<char>(Serial.read());
+
+    if (incoming == '\r')
+    {
+      continue;
+    }
+
+    if (incoming == '\n')
+    {
+      if (serialLineOverflow)
+      {
+        Serial.println(
+          "SERIAL ERROR: Incoming line exceeded buffer."
+        );
+      }
+      else
+      {
+        serialLineBuffer[serialLineLength] = '\0';
+        processSerialLine(serialLineBuffer);
+      }
+
+      serialLineLength = 0;
+      serialLineOverflow = false;
+      continue;
+    }
+
+    if (serialLineOverflow)
+    {
+      continue;
+    }
+
+    if (
+      serialLineLength <
+      SERIAL_LINE_BUFFER_SIZE - 1
+    )
+    {
+      serialLineBuffer[serialLineLength] = incoming;
+      serialLineLength++;
+    }
+    else
+    {
+      serialLineOverflow = true;
+    }
+  }
+}
+
+// ============================================================
+// TOUCH
 // ============================================================
 
 void handleTouch()
@@ -904,19 +1237,27 @@ void handleTouch()
   }
 
   lastTouchAt = now;
-  lastInteractionAt = now;
 
   Serial.print("Touch: ");
   Serial.print(touchX);
   Serial.print(", ");
   Serial.println(touchY);
 
-  // Ignore Touch during booting.
+  // Do not let touch interrupt LISTENING, THINKING, or TALKING.
+  if (pcExpressionActive)
+  {
+    Serial.println(
+      "Touch ignored while PC expression is active."
+    );
+    return;
+  }
+
   if (currentMode == MODE_BOOTING)
   {
     return;
   }
 
+  lastInteractionAt = now;
   startSurprised();
 
   if (!drawCurrentFrame())
@@ -931,13 +1272,22 @@ void handleTouch()
 }
 
 // ============================================================
-// LOOPING ANIMATION HELPER
+// ANIMATION ADVANCEMENT
 // ============================================================
 
-void advanceLoopingAnimation(
+void advancePingPongAnimation(
   Animation* animation
 )
 {
+  if (
+    animation->highestFrame <=
+    animation->firstFrame
+  )
+  {
+    currentFrame = animation->firstFrame;
+    return;
+  }
+
   currentFrame += frameDirection;
 
   if (currentFrame >= animation->highestFrame)
@@ -952,18 +1302,36 @@ void advanceLoopingAnimation(
   }
 }
 
-// ============================================================
-// ADVANCE CURRENT ANIMATION
-// ============================================================
+void advanceRepeatingAnimation(
+  Animation* animation
+)
+{
+  if (animation->pingPong)
+  {
+    advancePingPongAnimation(animation);
+    return;
+  }
+
+  currentFrame++;
+
+  if (currentFrame > animation->highestFrame)
+  {
+    currentFrame = animation->firstFrame;
+  }
+}
 
 void advanceAnimation()
 {
   Animation* animation = getCurrentAnimation();
 
-  // ----------------------------------------------------------
-  // Booting plays once.
-  // ----------------------------------------------------------
+  // Companion App modes loop until another serial command arrives.
+  if (isPcLoopingMode(currentMode))
+  {
+    advanceRepeatingAnimation(animation);
+    return;
+  }
 
+  // Boot plays once.
   if (currentMode == MODE_BOOTING)
   {
     currentFrame++;
@@ -977,10 +1345,7 @@ void advanceAnimation()
     return;
   }
 
-  // ----------------------------------------------------------
-  // Idle event animations play once.
-  // ----------------------------------------------------------
-
+  // Autonomous idle events play once.
   if (currentMode == MODE_BLINK_IDLE)
   {
     currentFrame++;
@@ -1005,10 +1370,7 @@ void advanceAnimation()
     return;
   }
 
-  // ----------------------------------------------------------
-  // Surprise plays once, then starts the Smile session.
-  // ----------------------------------------------------------
-
+  // Surprise plays once, then starts a smile session.
   if (currentMode == MODE_SURPRISED)
   {
     currentFrame++;
@@ -1021,10 +1383,7 @@ void advanceAnimation()
     return;
   }
 
-  // ----------------------------------------------------------
-  // Smile event animations play once.
-  // ----------------------------------------------------------
-
+  // Smile events play once.
   if (currentMode == MODE_BLINK_SMILE)
   {
     currentFrame++;
@@ -1049,10 +1408,7 @@ void advanceAnimation()
     return;
   }
 
-  // ----------------------------------------------------------
-  // Permanent looping states.
-  // ----------------------------------------------------------
-
+  // Permanent autonomous modes ping-pong.
   if (
     currentMode == MODE_IDLE ||
     currentMode == MODE_SMILE ||
@@ -1060,19 +1416,23 @@ void advanceAnimation()
     currentMode == MODE_SLEEPING
   )
   {
-    advanceLoopingAnimation(animation);
+    advancePingPongAnimation(animation);
   }
 }
 
 // ============================================================
-// TIMED BEHAVIOR
+// AUTONOMOUS BEHAVIOR
 // ============================================================
 
 void updateBehaviorTimers()
 {
+  if (pcExpressionActive)
+  {
+    return;
+  }
+
   unsigned long now = millis();
 
-  // Smile remains active for one minute after Touch.
   if (
     currentMode == MODE_SMILE &&
     now >= smileUntil
@@ -1083,7 +1443,6 @@ void updateBehaviorTimers()
     return;
   }
 
-  // Two minutes without Touch causes Tired.
   if (
     currentMode == MODE_IDLE &&
     now - lastInteractionAt >= IDLE_TO_TIRED_MS
@@ -1093,28 +1452,23 @@ void updateBehaviorTimers()
     return;
   }
 
-  // One minute in Tired causes Sleeping.
   if (
     currentMode == MODE_TIRED &&
     now - tiredStartedAt >= TIRED_TO_SLEEPING_MS
   )
   {
     startSleeping();
-    return;
   }
 }
 
-// ============================================================
-// RANDOM IDLE AND SMILE EVENTS
-// ============================================================
-
 void updateRandomEvents()
 {
-  unsigned long now = millis();
+  if (pcExpressionActive)
+  {
+    return;
+  }
 
-  // ----------------------------------------------------------
-  // Idle events
-  // ----------------------------------------------------------
+  unsigned long now = millis();
 
   if (currentMode == MODE_IDLE)
   {
@@ -1153,10 +1507,6 @@ void updateRandomEvents()
     }
   }
 
-  // ----------------------------------------------------------
-  // Smile events
-  // ----------------------------------------------------------
-
   if (currentMode == MODE_SMILE)
   {
     if (now >= nextLookAt)
@@ -1189,14 +1539,12 @@ void updateRandomEvents()
           "Could not draw smile blink frame."
         );
       }
-
-      return;
     }
   }
 }
 
 // ============================================================
-// UPDATE ANIMATION PLAYER
+// ANIMATION PLAYER
 // ============================================================
 
 void updateAnimation()
@@ -1234,16 +1582,16 @@ void updateAnimation()
 
 void setup()
 {
+  // Increase RX space for future structured JSON messages.
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
+
   delay(2000);
 
   Serial.println();
-  Serial.println("=== BMO BEHAVIOR TEST ===");
+  Serial.println("=== BMO COMPANION DISPLAY ===");
 
-  // ----------------------------------------------------------
-  // Initialize display
-  // ----------------------------------------------------------
-
+  // Display
   display.init();
   display.setRotation(1);
   display.setBrightness(180);
@@ -1259,10 +1607,7 @@ void setup()
   Serial.print(" x ");
   Serial.println(display.height());
 
-  // ----------------------------------------------------------
-  // Initialize SD card
-  // ----------------------------------------------------------
-
+  // SD card
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
 
@@ -1289,41 +1634,23 @@ void setup()
 
   Serial.println("SD initialized.");
 
-  // ----------------------------------------------------------
-  // Verify all animations
-  // ----------------------------------------------------------
-
+  // Verify all currently used assets.
   bool animationsValid = true;
 
-  animationsValid &=
-    verifyAnimation(bootingAnimation);
-
-  animationsValid &=
-    verifyAnimation(idleAnimation);
-
-  animationsValid &=
-    verifyAnimation(blinkIdleAnimation);
-
-  animationsValid &=
-    verifyAnimation(lookIdleAnimation);
-
-  animationsValid &=
-    verifyAnimation(surprisedAnimation);
-
-  animationsValid &=
-    verifyAnimation(smileAnimation);
-
-  animationsValid &=
-    verifyAnimation(blinkSmileAnimation);
-
-  animationsValid &=
-    verifyAnimation(lookSmileAnimation);
-
-  animationsValid &=
-    verifyAnimation(tiredAnimation);
-
-  animationsValid &=
-    verifyAnimation(sleepingAnimation);
+  animationsValid &= verifyAnimation(bootingAnimation);
+  animationsValid &= verifyAnimation(idleAnimation);
+  animationsValid &= verifyAnimation(blinkIdleAnimation);
+  animationsValid &= verifyAnimation(lookIdleAnimation);
+  animationsValid &= verifyAnimation(surprisedAnimation);
+  animationsValid &= verifyAnimation(smileAnimation);
+  animationsValid &= verifyAnimation(blinkSmileAnimation);
+  animationsValid &= verifyAnimation(lookSmileAnimation);
+  animationsValid &= verifyAnimation(tiredAnimation);
+  animationsValid &= verifyAnimation(sleepingAnimation);
+  animationsValid &= verifyAnimation(listeningAnimation);
+  animationsValid &= verifyAnimation(talkingAnimation);
+  animationsValid &= verifyAnimation(musicAnimation);
+  animationsValid &= verifyAnimation(ballBounceAnimation);
 
   if (!animationsValid)
   {
@@ -1337,14 +1664,9 @@ void setup()
 
   Serial.println("All animations verified.");
 
-  // ----------------------------------------------------------
-  // Initialize behavior
-  // ----------------------------------------------------------
-
   randomSeed(esp_random());
 
   lastInteractionAt = millis();
-
   startBooting();
 
   if (!drawCurrentFrame())
@@ -1359,7 +1681,8 @@ void setup()
 
   setupComplete = true;
 
-  Serial.println("BMO behavior system running.");
+  Serial.println("BMO display system running.");
+  Serial.println("Serial protocol ready.");
 }
 
 // ============================================================
@@ -1368,18 +1691,18 @@ void setup()
 
 void loop()
 {
+  // Serial remains available even when an asset error is visible.
+  updateSerialInput();
+
   if (!setupComplete)
   {
-    delay(100);
+    delay(10);
     return;
   }
 
   handleTouch();
-
   updateBehaviorTimers();
-
   updateRandomEvents();
-
   updateAnimation();
 
   delay(1);
