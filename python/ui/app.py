@@ -386,31 +386,86 @@ class BMOApp(ttk.Frame):
     def _format_tool_display(
         snapshot: BMOStateSnapshot,
     ) -> str:
-        """Create a concise debug summary of structured tool data."""
+        """
+        Create a concise debug summary of structured tool data.
+
+        Current conditions and daily forecasts use the same WEATHER screen,
+        but their structured payloads have different modes.
+        """
 
         if not snapshot.display_type or not snapshot.display_data:
             return "—"
 
         if snapshot.display_type == "WEATHER":
             data = snapshot.display_data
+            mode = data.get("mode", "current")
 
             location = data.get(
                 "location",
                 "Unknown location",
             )
-            temperature = data.get("temperature_c")
             condition = data.get(
                 "condition",
                 "unknown conditions",
             )
 
+            if mode == "forecast":
+                day_label = data.get(
+                    "day_label",
+                    "forecast",
+                )
+                minimum = data.get("temperature_min_c")
+                maximum = data.get("temperature_max_c")
+                rain_probability = data.get(
+                    "precipitation_probability_percent"
+                )
+
+                if (
+                    isinstance(minimum, (int, float))
+                    and isinstance(maximum, (int, float))
+                ):
+                    summary = (
+                        f"WEATHER — {day_label.capitalize()} in "
+                        f"{location}: {minimum:.1f}–{maximum:.1f} °C, "
+                        f"{condition}"
+                    )
+                else:
+                    summary = (
+                        f"WEATHER — {day_label.capitalize()} in "
+                        f"{location}: {condition}"
+                    )
+
+                if isinstance(rain_probability, (int, float)):
+                    summary += (
+                        f", rain chance "
+                        f"{rain_probability:.0f}%"
+                    )
+
+                return summary
+
+            temperature = data.get("temperature_c")
+            apparent_temperature = data.get(
+                "apparent_temperature_c"
+            )
+
             if isinstance(temperature, (int, float)):
-                return (
-                    f"WEATHER — {location}: "
+                summary = (
+                    f"WEATHER — Now in {location}: "
                     f"{temperature:.1f} °C, {condition}"
                 )
 
-            return f"WEATHER — {location}: {condition}"
+                if isinstance(
+                    apparent_temperature,
+                    (int, float),
+                ):
+                    summary += (
+                        f", feels like "
+                        f"{apparent_temperature:.1f} °C"
+                    )
+
+                return summary
+
+            return f"WEATHER — Now in {location}: {condition}"
 
         return (
             f"{snapshot.display_type} — "
