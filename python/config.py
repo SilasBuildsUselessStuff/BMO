@@ -103,3 +103,7 @@ WEATHER_FORECAST_URL = (
     "https://api.open-meteo.com/v1/forecast"
 )
 WEATHER_TIMEOUT = 10.0
+
+# Default location used when a weather request does not specify a place.
+WEATHER_DEFAULT_LOCATION = "Höpfingen, Germany"
+WEATHER_DEFAULT_POSTAL_CODE = "74746"
