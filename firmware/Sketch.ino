@@ -105,238 +105,1282 @@ void setExpression(Expression expression, unsigned long durationMs)
   expressionDuration = durationMs;
 
   expressionTimerActive = true;
+#define LGFX_USE_V1
 
-  printCurrentState();
-}
+#include <Arduino.h>
+#include <LovyanGFX.hpp>
+#include <SPI.h>
+#include <SD.h>
+#include <driver/i2c.h>
 
-void printHelp()
+// ============================================================
+// DISPLAY CONFIGURATION
+// Board: ESP32-3248S035C
+// Display: ST7796
+// Landscape resolution: 480 x 320
+// ============================================================
+
+class LGFX : public lgfx::LGFX_Device
 {
-  Serial.println("");
-  Serial.println("=== BMO DEBUG COMMANDS ===");
+  lgfx::Panel_ST7796 panel;
+  lgfx::Bus_SPI bus;
+  lgfx::Light_PWM backlight;
+  lgfx::Touch_GT911 touch;
 
-  Serial.println("");
-  Serial.println("Navigation");
-  Serial.println("r = Next Screen");
-  Serial.println("l = Previous Screen");
-  Serial.println("Screens");
-  Serial.println("f = FACE");
-  Serial.println("w = WEATHER");
-  Serial.println("s = SPOTIFY");
-
-  Serial.println("");
-
-  Serial.println("Expressions");
-  Serial.println("h = HAPPY");
-  Serial.println("a = ANGRY");
-  Serial.println("t = THINKING");
-  Serial.println("c = CONFUSED");
-  Serial.println("i = IDLE");
-
-  Serial.println("");
-
-  Serial.println("? = HELP");
-}
-
-void nextScreen()
-{
-  switch(currentScreen)
+public:
+  LGFX()
   {
-    case FACE:
-      currentScreen = WEATHER;
-      break;
+    // Display SPI bus
+    {
+      auto cfg = bus.config();
 
-    case WEATHER:
-      currentScreen = SPOTIFY;
-      break;
+      cfg.spi_host = HSPI_HOST;
+      cfg.spi_mode = 0;
+      cfg.freq_write = 80000000;
+      cfg.freq_read = 40000000;
+      cfg.spi_3wire = true;
+      cfg.use_lock = true;
+      cfg.dma_channel = SPI_DMA_CH_AUTO;
 
-    case SPOTIFY:
-      currentScreen = TODO_SCREEN;
-      break;
+      cfg.pin_sclk = 14;
+      cfg.pin_mosi = 13;
+      cfg.pin_miso = 12;
+      cfg.pin_dc = 2;
 
-    case TODO_SCREEN:
-      currentScreen = CLOCK;
-      break;
+      bus.config(cfg);
+      panel.setBus(&bus);
+    }
 
-    case CLOCK:
-      currentScreen = GAMES;
-      break;
+    // ST7796 display panel
+    {
+      auto cfg = panel.config();
 
-    case GAMES:
-      currentScreen = CHANCE;
-      break;
+      cfg.pin_cs = 15;
+      cfg.pin_rst = -1;
+      cfg.pin_busy = -1;
 
-    case CHANCE:
-      currentScreen = ANIMATION;
-      break;
+      cfg.panel_width = 320;
+      cfg.panel_height = 480;
 
-    case ANIMATION:
-      currentScreen = SETTINGS;
-      break;
+      cfg.offset_x = 0;
+      cfg.offset_y = 0;
+      cfg.offset_rotation = 0;
 
-    case SETTINGS:
-      currentScreen = SYSTEM_INFORMATION;
-      break;
+      cfg.dummy_read_pixel = 8;
+      cfg.dummy_read_bits = 1;
 
-    case SYSTEM_INFORMATION:
-      currentScreen = NOTIFICATION_SCREEN;
-      break;
+      cfg.readable = true;
+      cfg.invert = false;
+      cfg.rgb_order = false;
+      cfg.dlen_16bit = false;
+      cfg.bus_shared = true;
 
-    case NOTIFICATION_SCREEN:
-      currentScreen = LOW_BATTERY_SCREEN;
-      break;
+      panel.config(cfg);
+    }
 
-    case LOW_BATTERY_SCREEN:
-      currentScreen = FACE;
-      break;
+    // Display backlight
+    {
+      auto cfg = backlight.config();
+
+      cfg.pin_bl = 27;
+      cfg.invert = false;
+      cfg.freq = 1200;
+      cfg.pwm_channel = 7;
+
+      backlight.config(cfg);
+      panel.setLight(&backlight);
+    }
+
+    // Capacitive touch controller
+{
+  auto cfg = touch.config();
+
+  cfg.pin_int = GPIO_NUM_36;
+  cfg.pin_sda = GPIO_NUM_33;
+  cfg.pin_scl = GPIO_NUM_32;
+
+  cfg.i2c_addr = 0x5D;
+  cfg.i2c_port = I2C_NUM_0;
+  cfg.freq = 800000;
+
+  cfg.x_min = 14;
+  cfg.x_max = 310;
+  cfg.y_min = 5;
+  cfg.y_max = 448;
+
+  cfg.offset_rotation = 0;
+  cfg.bus_shared = false;
+
+  touch.config(cfg);
+  panel.setTouch(&touch);
+}
+
+    setPanel(&panel);
+  }
+};
+
+// ============================================================
+// HARDWARE OBJECTS
+// ============================================================
+
+LGFX display;
+SPIClass SDSPI(VSPI);
+
+// ============================================================
+// SD CARD CONFIGURATION
+// ============================================================
+
+static constexpr int SD_CS = 5;
+static constexpr int SD_SCLK = 18;
+static constexpr int SD_MISO = 19;
+static constexpr int SD_MOSI = 23;
+
+// ============================================================
+// ============================================================
+// ANIMATION DEFINITIONS
+//
+// highestFrame is inclusive because numbering begins at 0000.
+// ============================================================
+
+struct Animation
+{
+  const char* folder;
+  const char* filePrefix;
+  int firstFrame;
+  int highestFrame;
+  unsigned long frameDurationMs;
+  bool pingPong;
+};
+
+Animation bootingAnimation =
+{
+  "/assets/booting",
+  "booting",
+  0,
+  9,
+  350,
+  false
+};
+
+Animation idleAnimation =
+{
+  "/assets/idle",
+  "idle",
+  0,
+  8,
+  50,
+  true
+};
+
+Animation blinkIdleAnimation =
+{
+  "/assets/blinkidle",
+  "blinkidle",
+  0,
+  2,
+  50,
+  false
+};
+
+Animation lookIdleAnimation =
+{
+  "/assets/lookidle",
+  "lookidle",
+  0,
+  14,
+  50,
+  false
+};
+
+Animation surprisedAnimation =
+{
+  "/assets/surprised",
+  "surprised",
+  0,
+  3,
+  50,
+  false
+};
+
+Animation smileAnimation =
+{
+  "/assets/smile",
+  "smile",
+  0,
+  8,
+  50,
+  true
+};
+
+Animation blinkSmileAnimation =
+{
+  "/assets/blinksmile",
+  "blinksmile",
+  0,
+  5,
+  50,
+  false
+};
+
+Animation lookSmileAnimation =
+{
+  "/assets/looksmile",
+  "looksmile",
+  0,
+  20,
+  50,
+  false
+};
+
+Animation tiredAnimation =
+{
+  "/assets/tired",
+  "tired",
+  0,
+  9,
+  100,
+  true
+};
+
+Animation sleepingAnimation =
+{
+  "/assets/sleeping",
+  "sleeping",
+  0,
+  17,
+  120,
+  true
+};
+
+// ============================================================
+// BEHAVIOR TIMINGS
+// ============================================================
+
+static constexpr unsigned long SMILE_DURATION_MS =
+  60000UL;
+
+static constexpr unsigned long IDLE_TO_TIRED_MS =
+  120000UL;
+
+static constexpr unsigned long TIRED_TO_SLEEPING_MS =
+  60000UL;
+
+static constexpr unsigned long TOUCH_DEBOUNCE_MS =
+  250UL;
+
+// ============================================================
+// ANIMATION MODES
+// ============================================================
+
+enum AnimationMode
+{
+  MODE_BOOTING,
+
+  MODE_IDLE,
+  MODE_BLINK_IDLE,
+  MODE_LOOK_IDLE,
+
+  MODE_SURPRISED,
+
+  MODE_SMILE,
+  MODE_BLINK_SMILE,
+  MODE_LOOK_SMILE,
+
+  MODE_TIRED,
+  MODE_SLEEPING
+};
+
+AnimationMode currentMode = MODE_BOOTING;
+
+// ============================================================
+// FRAME STATE
+// ============================================================
+
+int currentFrame = 0;
+int frameDirection = 1;
+
+unsigned long lastFrameAt = 0;
+
+// ============================================================
+// EVENT TIMERS
+// ============================================================
+
+unsigned long nextBlinkAt = 0;
+unsigned long nextLookAt = 0;
+
+unsigned long smileUntil = 0;
+unsigned long lastInteractionAt = 0;
+unsigned long tiredStartedAt = 0;
+
+unsigned long lastTouchAt = 0;
+
+bool previousTouchState = false;
+bool setupComplete = false;
+
+// ============================================================
+// ERROR SCREEN
+// ============================================================
+
+void showError(
+  const char* title,
+  const char* message
+)
+{
+  display.fillScreen(
+    display.color565(20, 20, 20)
+  );
+
+  display.setTextSize(2);
+
+  display.setTextColor(
+    display.color565(255, 80, 80)
+  );
+
+  display.setCursor(20, 30);
+  display.println(title);
+
+  display.setTextColor(
+    display.color565(255, 255, 255)
+  );
+
+  display.setCursor(20, 75);
+  display.println(message);
+
+  display.setCursor(20, 120);
+  display.println("Check Serial Monitor.");
+}
+
+// ============================================================
+// GET CURRENT ANIMATION
+// ============================================================
+
+Animation* getCurrentAnimation()
+{
+  switch (currentMode)
+  {
+    case MODE_BOOTING:
+      return &bootingAnimation;
+
+    case MODE_IDLE:
+      return &idleAnimation;
+
+    case MODE_BLINK_IDLE:
+      return &blinkIdleAnimation;
+
+    case MODE_LOOK_IDLE:
+      return &lookIdleAnimation;
+
+    case MODE_SURPRISED:
+      return &surprisedAnimation;
+
+    case MODE_SMILE:
+      return &smileAnimation;
+
+    case MODE_BLINK_SMILE:
+      return &blinkSmileAnimation;
+
+    case MODE_LOOK_SMILE:
+      return &lookSmileAnimation;
+
+    case MODE_TIRED:
+      return &tiredAnimation;
+
+    case MODE_SLEEPING:
+      return &sleepingAnimation;
   }
 
-  printCurrentState();
+  return &idleAnimation;
 }
 
-void previousScreen()
+// ============================================================
+// BUILD FRAME PATH
+//
+// Example:
+// /assets/idle/idle0003.png
+// ============================================================
+
+void buildFramePath(
+  const Animation& animation,
+  int frameNumber,
+  char* outputPath,
+  size_t outputPathSize
+)
 {
-  switch(currentScreen)
+  snprintf(
+    outputPath,
+    outputPathSize,
+    "%s/%s%04d.png",
+    animation.folder,
+    animation.filePrefix,
+    frameNumber
+  );
+}
+
+// ============================================================
+// DRAW PNG FRAME FROM SD
+// ============================================================
+
+bool drawPngFrame(const char* path)
+{
+  File pngFile = SD.open(path, FILE_READ);
+
+  if (!pngFile)
   {
-    case FACE:
-      currentScreen = LOW_BATTERY_SCREEN;
-      break;
-
-    case WEATHER:
-      currentScreen = FACE;
-      break;
-
-    case SPOTIFY:
-      currentScreen = WEATHER;
-      break;
-
-    case TODO_SCREEN:
-      currentScreen = SPOTIFY;
-      break;
-
-    case CLOCK:
-      currentScreen = TODO_SCREEN;
-      break;
-
-    case GAMES:
-      currentScreen = CLOCK;
-      break;
-
-    case CHANCE:
-      currentScreen = GAMES;
-      break;
-
-    case ANIMATION:
-      currentScreen = CHANCE;
-      break;
-
-    case SETTINGS:
-      currentScreen = ANIMATION;
-      break;
-
-    case SYSTEM_INFORMATION:
-      currentScreen = SETTINGS;
-      break;
-
-    case NOTIFICATION_SCREEN:
-      currentScreen = SYSTEM_INFORMATION;
-      break;
-
-    case LOW_BATTERY_SCREEN:
-      currentScreen = NOTIFICATION_SCREEN;
-      break;
+    Serial.print("FRAME NOT FOUND: ");
+    Serial.println(path);
+    return false;
   }
 
-  printCurrentState();
+  size_t pngSize = pngFile.size();
+
+  if (pngSize == 0)
+  {
+    Serial.print("FRAME IS EMPTY: ");
+    Serial.println(path);
+
+    pngFile.close();
+    return false;
+  }
+
+  uint8_t* pngBuffer =
+    static_cast<uint8_t*>(malloc(pngSize));
+
+  if (pngBuffer == nullptr)
+  {
+    Serial.print("FRAME MEMORY FAILED: ");
+    Serial.println(path);
+
+    Serial.print("Required bytes: ");
+    Serial.println(pngSize);
+
+    Serial.print("Free heap: ");
+    Serial.println(ESP.getFreeHeap());
+
+    pngFile.close();
+    return false;
+  }
+
+  size_t bytesRead = pngFile.read(
+    pngBuffer,
+    pngSize
+  );
+
+  pngFile.close();
+
+  if (bytesRead != pngSize)
+  {
+    Serial.print("FRAME READ INCOMPLETE: ");
+    Serial.println(path);
+
+    free(pngBuffer);
+    return false;
+  }
+
+  bool drawResult = display.drawPng(
+    pngBuffer,
+    pngSize,
+    0,
+    0
+  );
+
+  free(pngBuffer);
+
+  if (!drawResult)
+  {
+    Serial.print("FRAME DECODE FAILED: ");
+    Serial.println(path);
+
+    return false;
+  }
+
+  return true;
 }
+
+// ============================================================
+// DRAW CURRENT FRAME
+// ============================================================
+
+bool drawCurrentFrame()
+{
+  Animation* animation = getCurrentAnimation();
+
+  char framePath[96];
+
+  buildFramePath(
+    *animation,
+    currentFrame,
+    framePath,
+    sizeof(framePath)
+  );
+
+  Serial.print("Drawing: ");
+  Serial.println(framePath);
+
+  return drawPngFrame(framePath);
+}
+
+// ============================================================
+// VERIFY ANIMATION
+// ============================================================
+
+bool verifyAnimation(const Animation& animation)
+{
+  char firstPath[96];
+  char lastPath[96];
+
+  buildFramePath(
+    animation,
+    animation.firstFrame,
+    firstPath,
+    sizeof(firstPath)
+  );
+
+  buildFramePath(
+    animation,
+    animation.highestFrame,
+    lastPath,
+    sizeof(lastPath)
+  );
+
+  File firstFile = SD.open(firstPath, FILE_READ);
+
+  if (!firstFile)
+  {
+    Serial.print("FIRST FRAME MISSING: ");
+    Serial.println(firstPath);
+    return false;
+  }
+
+  firstFile.close();
+
+  File lastFile = SD.open(lastPath, FILE_READ);
+
+  if (!lastFile)
+  {
+    Serial.print("LAST FRAME MISSING: ");
+    Serial.println(lastPath);
+    return false;
+  }
+
+  lastFile.close();
+
+  Serial.print("Animation verified: ");
+  Serial.print(animation.filePrefix);
+  Serial.print(" | Frames ");
+  Serial.print(animation.firstFrame);
+  Serial.print(" to ");
+  Serial.println(animation.highestFrame);
+
+  return true;
+}
+
+// ============================================================
+// EVENT SCHEDULING
+// ============================================================
+
+void scheduleNextBlink()
+{
+  nextBlinkAt =
+    millis() + random(5000, 10001);
+}
+
+void scheduleNextLook()
+{
+  nextLookAt =
+    millis() + random(10000, 20001);
+}
+
+void scheduleIdleEventsIfNeeded()
+{
+  if (nextBlinkAt == 0)
+  {
+    scheduleNextBlink();
+  }
+
+  if (nextLookAt == 0)
+  {
+    scheduleNextLook();
+  }
+}
+
+void scheduleSmileEventsIfNeeded()
+{
+  if (nextBlinkAt == 0)
+  {
+    scheduleNextBlink();
+  }
+
+  if (nextLookAt == 0)
+  {
+    scheduleNextLook();
+  }
+}
+
+// ============================================================
+// START AND RESUME MODES
+// ============================================================
+
+void startBooting()
+{
+  currentMode = MODE_BOOTING;
+  currentFrame = bootingAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  Serial.println("Animation: BOOTING");
+}
+
+void startFreshIdle()
+{
+  currentMode = MODE_IDLE;
+  currentFrame = idleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  scheduleIdleEventsIfNeeded();
+
+  Serial.println("Animation: IDLE");
+}
+
+void resumeIdle()
+{
+  currentMode = MODE_IDLE;
+  currentFrame = idleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  scheduleIdleEventsIfNeeded();
+
+  Serial.println("Animation: IDLE");
+}
+
+void startBlinkIdle()
+{
+  currentMode = MODE_BLINK_IDLE;
+  currentFrame = blinkIdleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+
+  Serial.println("Animation: BLINK IDLE");
+}
+
+void startLookIdle()
+{
+  currentMode = MODE_LOOK_IDLE;
+  currentFrame = lookIdleAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextLookAt = 0;
+
+  Serial.println("Animation: LOOK IDLE");
+}
+
+void startSurprised()
+{
+  currentMode = MODE_SURPRISED;
+  currentFrame = surprisedAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  Serial.println("Animation: SURPRISED");
+}
+
+void startSmileSession()
+{
+  currentMode = MODE_SMILE;
+  currentFrame = smileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  smileUntil = millis() + SMILE_DURATION_MS;
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  scheduleSmileEventsIfNeeded();
+
+  Serial.println("Animation: SMILE");
+}
+
+void resumeSmile()
+{
+  currentMode = MODE_SMILE;
+  currentFrame = smileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  scheduleSmileEventsIfNeeded();
+
+  Serial.println("Animation: SMILE");
+}
+
+void startBlinkSmile()
+{
+  currentMode = MODE_BLINK_SMILE;
+  currentFrame = blinkSmileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+
+  Serial.println("Animation: BLINK SMILE");
+}
+
+void startLookSmile()
+{
+  currentMode = MODE_LOOK_SMILE;
+  currentFrame = lookSmileAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextLookAt = 0;
+
+  Serial.println("Animation: LOOK SMILE");
+}
+
+void startTired()
+{
+  currentMode = MODE_TIRED;
+  currentFrame = tiredAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  tiredStartedAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  Serial.println("Animation: TIRED");
+}
+
+void startSleeping()
+{
+  currentMode = MODE_SLEEPING;
+  currentFrame = sleepingAnimation.firstFrame;
+  frameDirection = 1;
+  lastFrameAt = millis();
+
+  nextBlinkAt = 0;
+  nextLookAt = 0;
+
+  Serial.println("Animation: SLEEPING");
+}
+
+// ============================================================
+// TOUCH HANDLING
+// ============================================================
+
+void handleTouch()
+{
+  uint16_t touchX = 0;
+  uint16_t touchY = 0;
+
+  bool touched = display.getTouch(
+    &touchX,
+    &touchY
+  );
+
+  unsigned long now = millis();
+
+  bool newTouch =
+    touched &&
+    !previousTouchState &&
+    now - lastTouchAt >= TOUCH_DEBOUNCE_MS;
+
+  previousTouchState = touched;
+
+  if (!newTouch)
+  {
+    return;
+  }
+
+  lastTouchAt = now;
+  lastInteractionAt = now;
+
+  Serial.print("Touch: ");
+  Serial.print(touchX);
+  Serial.print(", ");
+  Serial.println(touchY);
+
+  // Ignore Touch during booting.
+  if (currentMode == MODE_BOOTING)
+  {
+    return;
+  }
+
+  startSurprised();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not draw surprise frame."
+    );
+  }
+}
+
+// ============================================================
+// LOOPING ANIMATION HELPER
+// ============================================================
+
+void advanceLoopingAnimation(
+  Animation* animation
+)
+{
+  currentFrame += frameDirection;
+
+  if (currentFrame >= animation->highestFrame)
+  {
+    currentFrame = animation->highestFrame;
+    frameDirection = -1;
+  }
+  else if (currentFrame <= animation->firstFrame)
+  {
+    currentFrame = animation->firstFrame;
+    frameDirection = 1;
+  }
+}
+
+// ============================================================
+// ADVANCE CURRENT ANIMATION
+// ============================================================
+
+void advanceAnimation()
+{
+  Animation* animation = getCurrentAnimation();
+
+  // ----------------------------------------------------------
+  // Booting plays once.
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_BOOTING)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      lastInteractionAt = millis();
+      startFreshIdle();
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Idle event animations play once.
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_BLINK_IDLE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      resumeIdle();
+    }
+
+    return;
+  }
+
+  if (currentMode == MODE_LOOK_IDLE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      resumeIdle();
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Surprise plays once, then starts the Smile session.
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_SURPRISED)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      startSmileSession();
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Smile event animations play once.
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_BLINK_SMILE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      resumeSmile();
+    }
+
+    return;
+  }
+
+  if (currentMode == MODE_LOOK_SMILE)
+  {
+    currentFrame++;
+
+    if (currentFrame > animation->highestFrame)
+    {
+      resumeSmile();
+    }
+
+    return;
+  }
+
+  // ----------------------------------------------------------
+  // Permanent looping states.
+  // ----------------------------------------------------------
+
+  if (
+    currentMode == MODE_IDLE ||
+    currentMode == MODE_SMILE ||
+    currentMode == MODE_TIRED ||
+    currentMode == MODE_SLEEPING
+  )
+  {
+    advanceLoopingAnimation(animation);
+  }
+}
+
+// ============================================================
+// TIMED BEHAVIOR
+// ============================================================
+
+void updateBehaviorTimers()
+{
+  unsigned long now = millis();
+
+  // Smile remains active for one minute after Touch.
+  if (
+    currentMode == MODE_SMILE &&
+    now >= smileUntil
+  )
+  {
+    Serial.println("Smile session finished.");
+    startFreshIdle();
+    return;
+  }
+
+  // Two minutes without Touch causes Tired.
+  if (
+    currentMode == MODE_IDLE &&
+    now - lastInteractionAt >= IDLE_TO_TIRED_MS
+  )
+  {
+    startTired();
+    return;
+  }
+
+  // One minute in Tired causes Sleeping.
+  if (
+    currentMode == MODE_TIRED &&
+    now - tiredStartedAt >= TIRED_TO_SLEEPING_MS
+  )
+  {
+    startSleeping();
+    return;
+  }
+}
+
+// ============================================================
+// RANDOM IDLE AND SMILE EVENTS
+// ============================================================
+
+void updateRandomEvents()
+{
+  unsigned long now = millis();
+
+  // ----------------------------------------------------------
+  // Idle events
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_IDLE)
+  {
+    if (now >= nextLookAt)
+    {
+      startLookIdle();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw look frame."
+        );
+      }
+
+      return;
+    }
+
+    if (now >= nextBlinkAt)
+    {
+      startBlinkIdle();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw blink frame."
+        );
+      }
+
+      return;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Smile events
+  // ----------------------------------------------------------
+
+  if (currentMode == MODE_SMILE)
+  {
+    if (now >= nextLookAt)
+    {
+      startLookSmile();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw smile look frame."
+        );
+      }
+
+      return;
+    }
+
+    if (now >= nextBlinkAt)
+    {
+      startBlinkSmile();
+
+      if (!drawCurrentFrame())
+      {
+        setupComplete = false;
+
+        showError(
+          "FRAME ERROR",
+          "Could not draw smile blink frame."
+        );
+      }
+
+      return;
+    }
+  }
+}
+
+// ============================================================
+// UPDATE ANIMATION PLAYER
+// ============================================================
+
+void updateAnimation()
+{
+  unsigned long now = millis();
+
+  Animation* animation = getCurrentAnimation();
+
+  if (
+    now - lastFrameAt <
+    animation->frameDurationMs
+  )
+  {
+    return;
+  }
+
+  lastFrameAt = now;
+
+  advanceAnimation();
+
+  if (!drawCurrentFrame())
+  {
+    setupComplete = false;
+
+    showError(
+      "FRAME ERROR",
+      "Could not draw animation frame."
+    );
+  }
+}
+
+// ============================================================
+// SETUP
+// ============================================================
 
 void setup()
 {
   Serial.begin(115200);
+  delay(2000);
 
-  Serial.println("BMO Booting...");
-  printHelp();
-  printCurrentState();
+  Serial.println();
+  Serial.println("=== BMO BEHAVIOR TEST ===");
+
+  // ----------------------------------------------------------
+  // Initialize display
+  // ----------------------------------------------------------
+
+  display.init();
+  display.setRotation(1);
+  display.setBrightness(180);
+  display.setColorDepth(16);
+  display.setSwapBytes(true);
+
+  display.fillScreen(
+    display.color565(0, 0, 0)
+  );
+
+  Serial.print("Display size: ");
+  Serial.print(display.width());
+  Serial.print(" x ");
+  Serial.println(display.height());
+
+  // ----------------------------------------------------------
+  // Initialize SD card
+  // ----------------------------------------------------------
+
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  SDSPI.begin(
+    SD_SCLK,
+    SD_MISO,
+    SD_MOSI,
+    SD_CS
+  );
+
+  SDSPI.setFrequency(1000000);
+
+  if (!SD.begin(SD_CS, SDSPI))
+  {
+    Serial.println("SD INITIALIZATION FAILED");
+
+    showError(
+      "SD ERROR",
+      "Could not initialize SD card."
+    );
+
+    return;
+  }
+
+  Serial.println("SD initialized.");
+
+  // ----------------------------------------------------------
+  // Verify all animations
+  // ----------------------------------------------------------
+
+  bool animationsValid = true;
+
+  animationsValid &=
+    verifyAnimation(bootingAnimation);
+
+  animationsValid &=
+    verifyAnimation(idleAnimation);
+
+  animationsValid &=
+    verifyAnimation(blinkIdleAnimation);
+
+  animationsValid &=
+    verifyAnimation(lookIdleAnimation);
+
+  animationsValid &=
+    verifyAnimation(surprisedAnimation);
+
+  animationsValid &=
+    verifyAnimation(smileAnimation);
+
+  animationsValid &=
+    verifyAnimation(blinkSmileAnimation);
+
+  animationsValid &=
+    verifyAnimation(lookSmileAnimation);
+
+  animationsValid &=
+    verifyAnimation(tiredAnimation);
+
+  animationsValid &=
+    verifyAnimation(sleepingAnimation);
+
+  if (!animationsValid)
+  {
+    showError(
+      "ASSET ERROR",
+      "Animation frames are missing."
+    );
+
+    return;
+  }
+
+  Serial.println("All animations verified.");
+
+  // ----------------------------------------------------------
+  // Initialize behavior
+  // ----------------------------------------------------------
+
+  randomSeed(esp_random());
+
+  lastInteractionAt = millis();
+
+  startBooting();
+
+  if (!drawCurrentFrame())
+  {
+    showError(
+      "FRAME ERROR",
+      "Could not draw first boot frame."
+    );
+
+    return;
+  }
+
+  setupComplete = true;
+
+  Serial.println("BMO behavior system running.");
 }
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
 
 void loop()
 {
-  // Expression timeout handling
-
-  if(expressionTimerActive)
+  if (!setupComplete)
   {
-    if(millis() - expressionStartTime >= expressionDuration)
-    {
-      currentExpression = defaultExpression;
-      expressionTimerActive = false;
-
-      Serial.println("Expression timeout.");
-      printCurrentState();
-    }
+    delay(100);
+    return;
   }
 
-  // Serial commands
+  handleTouch();
 
-  if(Serial.available())
-  {
-    char cmd = Serial.read();
+  updateBehaviorTimers();
 
-    switch(cmd)
-    {
-      // Screens
+  updateRandomEvents();
 
-      case 'r':
-            nextScreen();
-      return;
+  updateAnimation();
 
-      case 'l':
-             previousScreen();
-      return;
-      
-      case 'f':
-        currentScreen = FACE;
-        break;
-
-      case 'w':
-        currentScreen = WEATHER;
-        break;
-
-      case 's':
-        currentScreen = SPOTIFY;
-        break;
-
-      // Expressions
-
-      case 'h':
-        setExpression(HAPPY, 10000);
-        return;
-
-      case 'a':
-        setExpression(ANGRY, 15000);
-        return;
-
-      case 't':
-        setExpression(THINKING, 5000);
-        return;
-
-      case 'c':
-        setExpression(CONFUSED, 10000);
-        return;
-
-      case 'i':
-        currentExpression = IDLE;
-        expressionTimerActive = false;
-        break;
-
-      case '?':
-        printHelp();
-        return;
-    }
-
-    printCurrentState();
-  }
+  delay(1);
 }
-
-    printCurrentState();
-  }
-}
-
