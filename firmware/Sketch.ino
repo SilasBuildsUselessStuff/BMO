@@ -282,7 +282,7 @@ Animation sleepingAnimation = {
   0,
   16,
   120,
-  true
+  false
 };
 
 // Companion App expression animations
@@ -292,7 +292,7 @@ Animation listeningAnimation = {
   0,
   13,
   80,
-  true
+  false
 };
 
 Animation thinkingAnimation = {
