@@ -43,7 +43,10 @@ from core.assistant import BMOAssistant
 from core.state import BMOState
 from core.tools import ToolRegistry
 from services.weather import OpenMeteoWeatherService
-from services.weather_tool import CurrentWeatherTool
+from services.weather_tool import (
+    CurrentWeatherTool,
+    DailyForecastTool,
+)
 from ui.app import BMOApp
 from voice.listener import MicrophoneListener
 from voice.tts import WindowsTTS
@@ -87,6 +90,14 @@ def main() -> None:
     tool_registry = ToolRegistry()
     tool_registry.register(
         CurrentWeatherTool(
+            weather_service=weather_service,
+            default_location=WEATHER_DEFAULT_LOCATION,
+            location_aliases=WEATHER_LOCATION_ALIASES,
+        ).definition()
+    )
+    
+    tool_registry.register(
+        DailyForecastTool(
             weather_service=weather_service,
             default_location=WEATHER_DEFAULT_LOCATION,
             location_aliases=WEATHER_LOCATION_ALIASES,
