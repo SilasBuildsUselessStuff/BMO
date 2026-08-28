@@ -14,6 +14,7 @@ from config import (
     OLLAMA_BASE_URL,
     OLLAMA_KEEP_ALIVE,
     OLLAMA_MAX_TOKENS,
+    OLLAMA_MAX_TOOL_ROUNDS,
     OLLAMA_MODEL,
     OLLAMA_TEMPERATURE,
     OLLAMA_TIMEOUT,
@@ -23,6 +24,11 @@ from config import (
     TTS_RATE,
     TTS_VOICE_NAME,
     TTS_VOLUME,
+    WEATHER_DEFAULT_LOCATION,
+    WEATHER_FORECAST_URL,
+    WEATHER_GEOCODING_URL,
+    WEATHER_LOCATION_ALIASES,
+    WEATHER_TIMEOUT,
     WHISPER_COMPUTE_TYPE,
     WHISPER_DEVICE,
     WHISPER_HOTWORDS,
@@ -35,6 +41,9 @@ from config import (
 )
 from core.assistant import BMOAssistant
 from core.state import BMOState
+from core.tools import ToolRegistry
+from services.weather import OpenMeteoWeatherService
+from services.weather_tool import CurrentWeatherTool
 from ui.app import BMOApp
 from voice.listener import MicrophoneListener
 from voice.tts import WindowsTTS
@@ -44,17 +53,14 @@ from voice.whisper import WhisperTranscriber
 def main() -> None:
     """Create and run the BMO Companion development application."""
 
-    # Central thread-safe application state.
     state = BMOState()
 
-    # Non-blocking USB serial connection to the ESP32.
     connection = BMOConnection(
         port=SERIAL_PORT,
         baudrate=BAUDRATE,
         timeout=SERIAL_TIMEOUT,
     )
 
-    # PC microphone recorder.
     listener = MicrophoneListener(
         sample_rate=AUDIO_SAMPLE_RATE,
         channels=AUDIO_CHANNELS,
@@ -62,7 +68,6 @@ def main() -> None:
         device=AUDIO_INPUT_DEVICE,
     )
 
-    # Local Whisper speech-to-text model.
     transcriber = WhisperTranscriber(
         model_name=WHISPER_MODEL,
         device=WHISPER_DEVICE,
@@ -72,7 +77,22 @@ def main() -> None:
         hotwords=WHISPER_HOTWORDS,
     )
 
-    # Provider-independent AI implementation backed by local Ollama.
+    # Services retrieve data. Tools expose selected services to the AI.
+    weather_service = OpenMeteoWeatherService(
+        geocoding_url=WEATHER_GEOCODING_URL,
+        forecast_url=WEATHER_FORECAST_URL,
+        timeout=WEATHER_TIMEOUT,
+    )
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(
+        CurrentWeatherTool(
+            weather_service=weather_service,
+            default_location=WEATHER_DEFAULT_LOCATION,
+            location_aliases=WEATHER_LOCATION_ALIASES,
+        ).definition()
+    )
+
     ai_client = OllamaClient(
         base_url=OLLAMA_BASE_URL,
         model=OLLAMA_MODEL,
@@ -81,10 +101,10 @@ def main() -> None:
         keep_alive=OLLAMA_KEEP_ALIVE,
         temperature=OLLAMA_TEMPERATURE,
         max_tokens=OLLAMA_MAX_TOKENS,
+        tool_registry=tool_registry,
+        max_tool_rounds=OLLAMA_MAX_TOOL_ROUNDS,
     )
 
-    # Temporary local Windows TTS backend. This can later be replaced by a
-    # neural TTS provider without changing the assistant or GUI.
     tts = WindowsTTS(
         voice_name=TTS_VOICE_NAME,
         rate=TTS_RATE,
@@ -92,7 +112,6 @@ def main() -> None:
         bmo_pronunciation=TTS_BMO_PRONUNCIATION,
     )
 
-    # Coordinator for serial, microphone, Whisper, AI, TTS, and state.
     assistant = BMOAssistant(
         state=state,
         connection=connection,
@@ -120,13 +139,11 @@ def main() -> None:
         on_close=close_application,
     )
 
-    # Serial communication runs in its background worker.
     assistant.start()
 
     try:
         root.mainloop()
     finally:
-        # Also clean up after an unexpected exit from Tkinter.
         assistant.stop()
 
 
