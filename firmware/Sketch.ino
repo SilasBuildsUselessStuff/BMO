@@ -672,8 +672,8 @@ bool drawPngFrame(const char* path)
   Serial.print(" | Largest block: ");
   Serial.println(ESP.getMaxAllocHeap());
 
-  // Decode directly from the SD card. This avoids allocating one large
-  // memory block containing the entire compressed PNG file.
+  // Decode directly from the SD card instead of loading the complete PNG
+  // into one large heap allocation.
   bool drawResult = display.drawPngFile(
     SD,
     path,
@@ -689,6 +689,29 @@ bool drawPngFrame(const char* path)
   }
 
   return true;
+}
+
+// ============================================================
+// DRAW CURRENT ANIMATION FRAME
+// ============================================================
+
+bool drawCurrentFrame()
+{
+  Animation* animation = getCurrentAnimation();
+
+  char framePath[96];
+
+  buildFramePath(
+    *animation,
+    currentFrame,
+    framePath,
+    sizeof(framePath)
+  );
+
+  Serial.print("Drawing: ");
+  Serial.println(framePath);
+
+  return drawPngFrame(framePath);
 }
 
 // ============================================================
