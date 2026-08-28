@@ -101,6 +101,10 @@ class CurrentWeatherTool:
             name=self.TOOL_NAME,
             description=(
                 "Get live current weather for a location. "
+                "Always call this tool for every current-weather request, "
+                "even if weather for that location or another location was "
+                "discussed earlier. Never answer current weather from "
+                "conversation history. "
                 f"The configured default location is "
                 f"'{self.default_location}'. "
                 "Use this tool only for current weather conditions. "
