@@ -293,6 +293,15 @@ Animation listeningAnimation = {
   true
 };
 
+Animation thinkingAnimation = {
+  "/assets/thinking",
+  "thinking",
+  0,
+  7,
+  80,
+  true
+};
+
 Animation talkingAnimation = {
   "/assets/talking",
   "talking",
@@ -566,9 +575,10 @@ Animation* getCurrentAnimation()
       return &blinkIdleAnimation;
 
     case MODE_LOOK_IDLE:
-    case MODE_THINKING:
-      // Temporary THINKING animation until a dedicated folder exists.
       return &lookIdleAnimation;
+
+    case MODE_THINKING:
+      return &thinkingAnimation;
 
     case MODE_SURPRISED:
     case MODE_PC_SURPRISED:
@@ -1214,7 +1224,6 @@ void processSerialLine(char* line)
   {
     Serial.println("Matched command: THINKING");
 
-    // Temporary mapping until a dedicated thinking animation exists.
     startPcExpression(
       THINKING,
       MODE_THINKING
@@ -1746,6 +1755,7 @@ void setup()
   animationsValid &= verifyAnimation(tiredAnimation);
   animationsValid &= verifyAnimation(sleepingAnimation);
   animationsValid &= verifyAnimation(listeningAnimation);
+  animationsValid &= verifyAnimation(thinkingAnimation);
   animationsValid &= verifyAnimation(talkingAnimation);
   animationsValid &= verifyAnimation(musicAnimation);
   animationsValid &= verifyAnimation(ballBounceAnimation);
