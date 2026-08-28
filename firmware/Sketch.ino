@@ -1,11 +1,12 @@
 #define LGFX_USE_V1
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <LovyanGFX.hpp>
 #include <SPI.h>
 #include <SD.h>
 #include <driver/i2c.h>
-#include <ArduinoJson.h>
+#include <math.h>
 
 // ============================================================
 // DISPLAY CONFIGURATION
@@ -339,6 +340,7 @@ static constexpr unsigned long SMILE_DURATION_MS = 60000UL;
 static constexpr unsigned long IDLE_TO_TIRED_MS = 120000UL;
 static constexpr unsigned long TIRED_TO_SLEEPING_MS = 60000UL;
 static constexpr unsigned long TOUCH_DEBOUNCE_MS = 250UL;
+static constexpr unsigned long WEATHER_SCREEN_DURATION_MS = 12000UL;
 
 // ============================================================
 // ANIMATION MODES
@@ -407,6 +409,41 @@ static constexpr size_t SERIAL_LINE_BUFFER_SIZE = 1536;
 char serialLineBuffer[SERIAL_LINE_BUFFER_SIZE];
 size_t serialLineLength = 0;
 bool serialLineOverflow = false;
+
+// ============================================================
+// STRUCTURED WEATHER SCREEN DATA
+// ============================================================
+
+struct WeatherScreenData
+{
+  bool valid = false;
+  bool forecast = false;
+
+  char location[128] = "";
+  char condition[48] = "";
+  char dayLabel[32] = "";
+  char date[24] = "";
+  char observedAt[32] = "";
+
+  int weatherCode = -1;
+
+  float temperatureC = NAN;
+  float apparentTemperatureC = NAN;
+
+  float temperatureMinC = NAN;
+  float temperatureMaxC = NAN;
+
+  int precipitationProbabilityPercent = -1;
+  float precipitationMm = NAN;
+  float windSpeedKmh = NAN;
+};
+
+WeatherScreenData weatherScreenData;
+
+bool weatherScreenPending = false;
+bool weatherScreenActive = false;
+
+unsigned long weatherScreenStartedAt = 0;
 
 // ============================================================
 // NAMES
@@ -1048,6 +1085,777 @@ void startSleeping()
 }
 
 // ============================================================
+// WEATHER SCREEN HELPERS
+// ============================================================
+
+void makeDisplaySafe(
+  const char* source,
+  char* destination,
+  size_t destinationSize
+)
+{
+  if (
+    source == nullptr ||
+    destination == nullptr ||
+    destinationSize == 0
+  )
+  {
+    return;
+  }
+
+  size_t sourceIndex = 0;
+  size_t destinationIndex = 0;
+
+  while (
+    source[sourceIndex] != '\0' &&
+    destinationIndex < destinationSize - 1
+  )
+  {
+    uint8_t first =
+      static_cast<uint8_t>(source[sourceIndex]);
+
+    // Convert common German UTF-8 characters for the built-in font.
+    if (
+      first == 0xC3 &&
+      source[sourceIndex + 1] != '\0'
+    )
+    {
+      uint8_t second = static_cast<uint8_t>(
+        source[sourceIndex + 1]
+      );
+
+      const char* replacement = nullptr;
+
+      switch (second)
+      {
+        case 0xA4:
+          replacement = "ae";
+          break;
+
+        case 0xB6:
+          replacement = "oe";
+          break;
+
+        case 0xBC:
+          replacement = "ue";
+          break;
+
+        case 0x84:
+          replacement = "Ae";
+          break;
+
+        case 0x96:
+          replacement = "Oe";
+          break;
+
+        case 0x9C:
+          replacement = "Ue";
+          break;
+
+        case 0x9F:
+          replacement = "ss";
+          break;
+      }
+
+      if (replacement != nullptr)
+      {
+        for (
+          size_t index = 0;
+          replacement[index] != '\0' &&
+          destinationIndex < destinationSize - 1;
+          index++
+        )
+        {
+          destination[destinationIndex++] =
+            replacement[index];
+        }
+
+        sourceIndex += 2;
+        continue;
+      }
+    }
+
+    // Copy ordinary ASCII. Replace unsupported UTF-8 bytes with '?'.
+    if (first < 128)
+    {
+      destination[destinationIndex++] =
+        source[sourceIndex];
+    }
+    else
+    {
+      destination[destinationIndex++] = '?';
+    }
+
+    sourceIndex++;
+  }
+
+  destination[destinationIndex] = '\0';
+}
+
+// ============================================================
+// SIMPLE WEATHER ICONS
+// ============================================================
+
+void drawSunIcon(
+  int centerX,
+  int centerY,
+  uint16_t color
+)
+{
+  display.fillCircle(
+    centerX,
+    centerY,
+    28,
+    color
+  );
+
+  for (int angle = 0; angle < 360; angle += 45)
+  {
+    float radians = angle * DEG_TO_RAD;
+
+    int innerX =
+      centerX + static_cast<int>(38 * cos(radians));
+    int innerY =
+      centerY + static_cast<int>(38 * sin(radians));
+
+    int outerX =
+      centerX + static_cast<int>(52 * cos(radians));
+    int outerY =
+      centerY + static_cast<int>(52 * sin(radians));
+
+    display.drawLine(
+      innerX,
+      innerY,
+      outerX,
+      outerY,
+      color
+    );
+
+    display.drawLine(
+      innerX + 1,
+      innerY,
+      outerX + 1,
+      outerY,
+      color
+    );
+  }
+}
+
+void drawCloudIcon(
+  int centerX,
+  int centerY,
+  uint16_t color
+)
+{
+  display.fillCircle(
+    centerX - 28,
+    centerY + 4,
+    24,
+    color
+  );
+
+  display.fillCircle(
+    centerX,
+    centerY - 12,
+    32,
+    color
+  );
+
+  display.fillCircle(
+    centerX + 32,
+    centerY + 5,
+    23,
+    color
+  );
+
+  display.fillRoundRect(
+    centerX - 52,
+    centerY,
+    104,
+    35,
+    14,
+    color
+  );
+}
+
+void drawRainIcon(
+  int centerX,
+  int centerY,
+  uint16_t cloudColor,
+  uint16_t rainColor
+)
+{
+  drawCloudIcon(
+    centerX,
+    centerY - 20,
+    cloudColor
+  );
+
+  for (int offset = -30; offset <= 30; offset += 20)
+  {
+    display.drawLine(
+      centerX + offset,
+      centerY + 30,
+      centerX + offset - 7,
+      centerY + 48,
+      rainColor
+    );
+
+    display.drawLine(
+      centerX + offset + 1,
+      centerY + 30,
+      centerX + offset - 6,
+      centerY + 48,
+      rainColor
+    );
+  }
+}
+
+void drawSnowIcon(
+  int centerX,
+  int centerY,
+  uint16_t cloudColor,
+  uint16_t snowColor
+)
+{
+  drawCloudIcon(
+    centerX,
+    centerY - 20,
+    cloudColor
+  );
+
+  for (int offset = -28; offset <= 28; offset += 28)
+  {
+    int snowX = centerX + offset;
+    int snowY = centerY + 40;
+
+    display.drawLine(
+      snowX - 6,
+      snowY,
+      snowX + 6,
+      snowY,
+      snowColor
+    );
+
+    display.drawLine(
+      snowX,
+      snowY - 6,
+      snowX,
+      snowY + 6,
+      snowColor
+    );
+
+    display.drawLine(
+      snowX - 4,
+      snowY - 4,
+      snowX + 4,
+      snowY + 4,
+      snowColor
+    );
+
+    display.drawLine(
+      snowX + 4,
+      snowY - 4,
+      snowX - 4,
+      snowY + 4,
+      snowColor
+    );
+  }
+}
+
+void drawFogIcon(
+  int centerX,
+  int centerY,
+  uint16_t color
+)
+{
+  drawCloudIcon(
+    centerX,
+    centerY - 30,
+    color
+  );
+
+  for (int offset = 20; offset <= 55; offset += 12)
+  {
+    display.drawLine(
+      centerX - 52,
+      centerY + offset,
+      centerX + 52,
+      centerY + offset,
+      color
+    );
+  }
+}
+
+void drawThunderIcon(
+  int centerX,
+  int centerY,
+  uint16_t cloudColor,
+  uint16_t lightningColor
+)
+{
+  drawCloudIcon(
+    centerX,
+    centerY - 25,
+    cloudColor
+  );
+
+  display.fillTriangle(
+    centerX + 4,
+    centerY + 12,
+    centerX - 15,
+    centerY + 48,
+    centerX + 2,
+    centerY + 43,
+    lightningColor
+  );
+
+  display.fillTriangle(
+    centerX + 2,
+    centerY + 43,
+    centerX + 19,
+    centerY + 35,
+    centerX - 8,
+    centerY + 68,
+    lightningColor
+  );
+}
+
+void drawWeatherIcon(
+  int weatherCode,
+  int centerX,
+  int centerY
+)
+{
+  uint16_t sunColor =
+    display.color565(255, 210, 45);
+
+  uint16_t cloudColor =
+    display.color565(225, 235, 240);
+
+  uint16_t rainColor =
+    display.color565(75, 180, 255);
+
+  uint16_t snowColor =
+    display.color565(245, 250, 255);
+
+  uint16_t lightningColor =
+    display.color565(255, 230, 40);
+
+  if (weatherCode == 0 || weatherCode == 1)
+  {
+    drawSunIcon(
+      centerX,
+      centerY,
+      sunColor
+    );
+  }
+  else if (weatherCode == 2)
+  {
+    drawSunIcon(
+      centerX - 25,
+      centerY - 22,
+      sunColor
+    );
+
+    drawCloudIcon(
+      centerX + 10,
+      centerY + 5,
+      cloudColor
+    );
+  }
+  else if (
+    weatherCode == 45 ||
+    weatherCode == 48
+  )
+  {
+    drawFogIcon(
+      centerX,
+      centerY,
+      cloudColor
+    );
+  }
+  else if (
+    weatherCode >= 51 &&
+    weatherCode <= 67
+  )
+  {
+    drawRainIcon(
+      centerX,
+      centerY,
+      cloudColor,
+      rainColor
+    );
+  }
+  else if (
+    weatherCode >= 71 &&
+    weatherCode <= 77
+  )
+  {
+    drawSnowIcon(
+      centerX,
+      centerY,
+      cloudColor,
+      snowColor
+    );
+  }
+  else if (
+    weatherCode >= 80 &&
+    weatherCode <= 82
+  )
+  {
+    drawRainIcon(
+      centerX,
+      centerY,
+      cloudColor,
+      rainColor
+    );
+  }
+  else if (
+    weatherCode == 85 ||
+    weatherCode == 86
+  )
+  {
+    drawSnowIcon(
+      centerX,
+      centerY,
+      cloudColor,
+      snowColor
+    );
+  }
+  else if (weatherCode >= 95)
+  {
+    drawThunderIcon(
+      centerX,
+      centerY,
+      cloudColor,
+      lightningColor
+    );
+  }
+  else
+  {
+    drawCloudIcon(
+      centerX,
+      centerY,
+      cloudColor
+    );
+  }
+}
+
+// ============================================================
+// RENDER WEATHER SCREEN
+// ============================================================
+
+void renderWeatherScreen()
+{
+  const uint16_t backgroundColor =
+    display.color565(20, 55, 85);
+
+  const uint16_t headerColor =
+    display.color565(35, 125, 165);
+
+  const uint16_t panelColor =
+    display.color565(28, 75, 105);
+
+  const uint16_t textColor =
+    display.color565(255, 255, 255);
+
+  const uint16_t secondaryTextColor =
+    display.color565(190, 225, 240);
+
+  const uint16_t accentColor =
+    display.color565(255, 220, 80);
+
+  display.fillScreen(backgroundColor);
+
+  // Header
+  display.fillRect(
+    0,
+    0,
+    480,
+    52,
+    headerColor
+  );
+
+  display.setTextColor(textColor);
+  display.setTextSize(2);
+  display.setCursor(16, 16);
+
+  if (weatherScreenData.forecast)
+  {
+    if (weatherScreenData.dayLabel[0] != '\0')
+    {
+      display.print("FORECAST: ");
+      display.print(weatherScreenData.dayLabel);
+    }
+    else
+    {
+      display.print("WEATHER FORECAST");
+    }
+  }
+  else
+  {
+    display.print("CURRENT WEATHER");
+  }
+
+  // Main information panel
+  display.fillRoundRect(
+    12,
+    65,
+    285,
+    205,
+    14,
+    panelColor
+  );
+
+  char safeLocation[128];
+
+  makeDisplaySafe(
+    weatherScreenData.location,
+    safeLocation,
+    sizeof(safeLocation)
+  );
+
+  display.setTextColor(secondaryTextColor);
+
+  if (strlen(safeLocation) > 34)
+  {
+    display.setTextSize(1);
+  }
+  else
+  {
+    display.setTextSize(2);
+  }
+
+  display.setCursor(25, 82);
+  display.print(safeLocation);
+
+  display.setTextColor(textColor);
+
+  if (weatherScreenData.forecast)
+  {
+    display.setTextSize(3);
+    display.setCursor(25, 120);
+
+    if (
+      !isnan(weatherScreenData.temperatureMinC) &&
+      !isnan(weatherScreenData.temperatureMaxC)
+    )
+    {
+      display.print(
+        weatherScreenData.temperatureMinC,
+        1
+      );
+
+      display.print(" - ");
+
+      display.print(
+        weatherScreenData.temperatureMaxC,
+        1
+      );
+
+      display.print(" C");
+    }
+    else
+    {
+      display.print("-- C");
+    }
+  }
+  else
+  {
+    display.setTextSize(5);
+    display.setCursor(25, 115);
+
+    if (!isnan(weatherScreenData.temperatureC))
+    {
+      display.print(
+        weatherScreenData.temperatureC,
+        1
+      );
+
+      display.print(" C");
+    }
+    else
+    {
+      display.print("-- C");
+    }
+  }
+
+  char safeCondition[64];
+
+  makeDisplaySafe(
+    weatherScreenData.condition,
+    safeCondition,
+    sizeof(safeCondition)
+  );
+
+  display.setTextColor(accentColor);
+  display.setTextSize(2);
+  display.setCursor(25, 180);
+  display.print(safeCondition);
+
+  display.setTextColor(secondaryTextColor);
+  display.setTextSize(1);
+
+  if (weatherScreenData.forecast)
+  {
+    display.setCursor(25, 220);
+
+    if (
+      weatherScreenData.precipitationProbabilityPercent >= 0
+    )
+    {
+      display.print("Rain chance: ");
+      display.print(
+        weatherScreenData.precipitationProbabilityPercent
+      );
+      display.print("%");
+    }
+
+    display.setCursor(25, 242);
+
+    if (!isnan(weatherScreenData.windSpeedKmh))
+    {
+      display.print("Max wind: ");
+      display.print(
+        weatherScreenData.windSpeedKmh,
+        1
+      );
+      display.print(" km/h");
+    }
+  }
+  else
+  {
+    display.setCursor(25, 220);
+
+    if (!isnan(weatherScreenData.apparentTemperatureC))
+    {
+      display.print("Feels like: ");
+      display.print(
+        weatherScreenData.apparentTemperatureC,
+        1
+      );
+      display.print(" C");
+    }
+
+    display.setCursor(25, 242);
+
+    if (!isnan(weatherScreenData.windSpeedKmh))
+    {
+      display.print("Wind: ");
+      display.print(
+        weatherScreenData.windSpeedKmh,
+        1
+      );
+      display.print(" km/h");
+    }
+  }
+
+  // Weather icon area
+  drawWeatherIcon(
+    weatherScreenData.weatherCode,
+    385,
+    145
+  );
+
+  // Footer
+  display.drawFastHLine(
+    0,
+    286,
+    480,
+    headerColor
+  );
+
+  display.setTextColor(secondaryTextColor);
+  display.setTextSize(1);
+  display.setCursor(16, 299);
+
+  if (
+    weatherScreenData.forecast &&
+    weatherScreenData.date[0] != '\0'
+  )
+  {
+    display.print(weatherScreenData.date);
+  }
+  else if (weatherScreenData.observedAt[0] != '\0')
+  {
+    display.print("Observed: ");
+    display.print(weatherScreenData.observedAt);
+  }
+
+  display.setCursor(356, 299);
+  display.print("Tap to close");
+}
+
+// ============================================================
+// WEATHER SCREEN LIFECYCLE
+// ============================================================
+
+void showWeatherScreen()
+{
+  if (!weatherScreenData.valid)
+  {
+    Serial.println(
+      "WEATHER ERROR: No valid weather data is stored."
+    );
+    return;
+  }
+
+  weatherScreenPending = false;
+  weatherScreenActive = true;
+  weatherScreenStartedAt = millis();
+
+  pcExpressionActive = false;
+  currentScreen = WEATHER;
+  currentExpression = IDLE;
+
+  Serial.println("Showing physical WEATHER screen.");
+  printCurrentState();
+
+  renderWeatherScreen();
+}
+
+void dismissWeatherScreen()
+{
+  if (!weatherScreenActive)
+  {
+    return;
+  }
+
+  Serial.println("Closing physical WEATHER screen.");
+
+  weatherScreenActive = false;
+  weatherScreenPending = false;
+
+  lastInteractionAt = millis();
+  startFreshIdle();
+
+  if (!drawCurrentFrame())
+  {
+    Serial.println(
+      "Could not draw idle frame after weather screen."
+    );
+  }
+}
+
+void updateWeatherScreen()
+{
+  if (!weatherScreenActive)
+  {
+    return;
+  }
+
+  if (
+    millis() - weatherScreenStartedAt >=
+    WEATHER_SCREEN_DURATION_MS
+  )
+  {
+    Serial.println("WEATHER screen timeout.");
+    dismissWeatherScreen();
+  }
+}
+
+// ============================================================
 // PC-CONTROLLED EXPRESSIONS
 // ============================================================
 
@@ -1155,35 +1963,247 @@ void setExpressionFromName(const char* expressionName)
 }
 
 // ============================================================
+// STRUCTURED SCREEN JSON
+// ============================================================
+
+float readJsonFloat(
+  JsonVariantConst value,
+  float fallback = NAN
+)
+{
+  if (value.isNull())
+  {
+    return fallback;
+  }
+
+  return value.as<float>();
+}
+
+int readJsonInteger(
+  JsonVariantConst value,
+  int fallback = -1
+)
+{
+  if (value.isNull())
+  {
+    return fallback;
+  }
+
+  return value.as<int>();
+}
+
+bool processScreenDataJson(const char* jsonText)
+{
+  JsonDocument document;
+
+  DeserializationError error = deserializeJson(
+    document,
+    jsonText
+  );
+
+  if (error)
+  {
+    Serial.print("JSON ERROR: ");
+    Serial.println(error.c_str());
+    return false;
+  }
+
+  const char* type =
+    document["type"] | "";
+
+  const char* screen =
+    document["screen"] | "";
+
+  if (strcmp(type, "screen_data") != 0)
+  {
+    Serial.print("JSON ignored: unsupported type [");
+    Serial.print(type);
+    Serial.println("]");
+    return false;
+  }
+
+  if (strcmp(screen, "WEATHER") != 0)
+  {
+    Serial.print("JSON ignored: unsupported screen [");
+    Serial.print(screen);
+    Serial.println("]");
+    return false;
+  }
+
+  JsonObjectConst data =
+    document["data"].as<JsonObjectConst>();
+
+  if (data.isNull())
+  {
+    Serial.println(
+      "WEATHER JSON ERROR: Missing data object."
+    );
+    return false;
+  }
+
+  WeatherScreenData incoming;
+
+  const char* mode =
+    data["mode"] | "current";
+
+  incoming.forecast =
+    strcmp(mode, "forecast") == 0;
+
+  strlcpy(
+    incoming.location,
+    data["location"] | "Unknown location",
+    sizeof(incoming.location)
+  );
+
+  strlcpy(
+    incoming.condition,
+    data["condition"] | "unknown conditions",
+    sizeof(incoming.condition)
+  );
+
+  strlcpy(
+    incoming.dayLabel,
+    data["day_label"] | "",
+    sizeof(incoming.dayLabel)
+  );
+
+  strlcpy(
+    incoming.date,
+    data["date"] | "",
+    sizeof(incoming.date)
+  );
+
+  strlcpy(
+    incoming.observedAt,
+    data["observed_at"] | "",
+    sizeof(incoming.observedAt)
+  );
+
+  incoming.weatherCode = readJsonInteger(
+    data["weather_code"]
+  );
+
+  incoming.temperatureC = readJsonFloat(
+    data["temperature_c"]
+  );
+
+  incoming.apparentTemperatureC = readJsonFloat(
+    data["apparent_temperature_c"]
+  );
+
+  incoming.temperatureMinC = readJsonFloat(
+    data["temperature_min_c"]
+  );
+
+  incoming.temperatureMaxC = readJsonFloat(
+    data["temperature_max_c"]
+  );
+
+  incoming.precipitationProbabilityPercent =
+    readJsonInteger(
+      data["precipitation_probability_percent"]
+    );
+
+  // Current weather uses precipitation_mm. Forecast data uses
+  // precipitation_sum_mm.
+  if (!data["precipitation_mm"].isNull())
+  {
+    incoming.precipitationMm = readJsonFloat(
+      data["precipitation_mm"]
+    );
+  }
+  else
+  {
+    incoming.precipitationMm = readJsonFloat(
+      data["precipitation_sum_mm"]
+    );
+  }
+
+  // Current weather and forecast payloads use different wind keys.
+  if (!data["wind_speed_kmh"].isNull())
+  {
+    incoming.windSpeedKmh = readJsonFloat(
+      data["wind_speed_kmh"]
+    );
+  }
+  else
+  {
+    incoming.windSpeedKmh = readJsonFloat(
+      data["wind_speed_max_kmh"]
+    );
+  }
+
+  incoming.valid = true;
+
+  weatherScreenData = incoming;
+  weatherScreenPending = true;
+
+  Serial.println("WEATHER JSON stored successfully.");
+
+  Serial.print("Weather mode: ");
+  Serial.println(
+    weatherScreenData.forecast
+      ? "forecast"
+      : "current"
+  );
+
+  Serial.print("Weather location: ");
+  Serial.println(weatherScreenData.location);
+
+  Serial.print("Weather condition: ");
+  Serial.println(weatherScreenData.condition);
+
+  Serial.print("Weather code: ");
+  Serial.println(weatherScreenData.weatherCode);
+
+  return true;
+}
+
+// ============================================================
 // SERIAL COMMAND HANDLING
 // ============================================================
 
 void processSerialLine(char* line)
 {
-  String command = String(line);
+  String rawCommand = String(line);
+  rawCommand.trim();
 
-  // Remove spaces, tabs, CR, and other whitespace at both ends.
-  command.trim();
-
-  // Allow lowercase commands from Serial Monitor.
-  command.toUpperCase();
-
-  if (command.length() == 0)
+  if (rawCommand.length() == 0)
   {
     return;
   }
-  // Normalize optional whitespace after EXPRESSION: so both
-  // "EXPRESSION:TALKING" and "EXPRESSION: TALKING" work.
-  static const String expressionPrefix = "EXPRESSION:";
+
+  // JSON is case-sensitive and must be handled before uppercasing ordinary
+  // serial commands.
+  if (rawCommand.startsWith("{"))
+  {
+    Serial.println("Structured JSON received.");
+
+    processScreenDataJson(
+      rawCommand.c_str()
+    );
+
+    return;
+  }
+
+  String command = rawCommand;
+  command.toUpperCase();
+
+  // Normalize optional whitespace after EXPRESSION:.
+  static const String expressionPrefix =
+    "EXPRESSION:";
 
   if (command.startsWith(expressionPrefix))
   {
     String expressionName =
-      command.substring(expressionPrefix.length());
+      command.substring(
+        expressionPrefix.length()
+      );
 
     expressionName.trim();
 
-    command = expressionPrefix + expressionName;
+    command =
+      expressionPrefix + expressionName;
   }
 
   Serial.print("Normalized command: [");
@@ -1199,21 +2219,41 @@ void processSerialLine(char* line)
   if (command == "EXPRESSION:IDLE")
   {
     Serial.println("Matched command: IDLE");
-    releasePcExpressionToIdle();
+
+    // A weather payload arrives before TALKING. Show it only after speech
+    // finishes and Python returns BMO to IDLE.
+    if (
+      weatherScreenPending &&
+      weatherScreenData.valid
+    )
+    {
+      showWeatherScreen();
+    }
+    else
+    {
+      releasePcExpressionToIdle();
+    }
+
     return;
   }
 
   if (command == "EXPRESSION:HAPPY")
   {
     Serial.println("Matched command: HAPPY");
-    startPcExpression(HAPPY, MODE_PC_HAPPY);
+    startPcExpression(
+      HAPPY,
+      MODE_PC_HAPPY
+    );
     return;
   }
 
   if (command == "EXPRESSION:HYPED")
   {
     Serial.println("Matched command: HYPED");
-    startPcExpression(HYPED, MODE_PC_HAPPY);
+    startPcExpression(
+      HYPED,
+      MODE_PC_HAPPY
+    );
     return;
   }
 
@@ -1250,6 +2290,9 @@ void processSerialLine(char* line)
   if (command == "EXPRESSION:LISTENING")
   {
     Serial.println("Matched command: LISTENING");
+
+    weatherScreenActive = false;
+
     startPcExpression(
       LISTENING,
       MODE_LISTENING
@@ -1261,6 +2304,8 @@ void processSerialLine(char* line)
   {
     Serial.println("Matched command: THINKING");
 
+    weatherScreenActive = false;
+
     startPcExpression(
       THINKING,
       MODE_THINKING
@@ -1271,6 +2316,9 @@ void processSerialLine(char* line)
   if (command == "EXPRESSION:TALKING")
   {
     Serial.println("Matched command: TALKING");
+
+    weatherScreenActive = false;
+
     startPcExpression(
       TALKING,
       MODE_TALKING
@@ -1281,6 +2329,9 @@ void processSerialLine(char* line)
   if (command == "EXPRESSION:MUSIC_ENJOYING")
   {
     Serial.println("Matched command: MUSIC_ENJOYING");
+
+    weatherScreenActive = false;
+
     startPcExpression(
       MUSIC_ENJOYING,
       MODE_MUSIC
@@ -1288,67 +2339,9 @@ void processSerialLine(char* line)
     return;
   }
 
-  if (command.startsWith("{"))
-  {
-    Serial.println(
-      "SCREEN_DATA received; JSON renderer not implemented yet."
-    );
-    return;
-  }
-
   Serial.print("Unknown command: [");
   Serial.print(command);
   Serial.println("]");
-}
-
-void updateSerialInput()
-{
-  while (Serial.available() > 0)
-  {
-    char incoming = static_cast<char>(Serial.read());
-
-    if (incoming == '\r')
-    {
-      continue;
-    }
-
-    if (incoming == '\n')
-    {
-      if (serialLineOverflow)
-      {
-        Serial.println(
-          "SERIAL ERROR: Incoming line exceeded buffer."
-        );
-      }
-      else
-      {
-        serialLineBuffer[serialLineLength] = '\0';
-        processSerialLine(serialLineBuffer);
-      }
-
-      serialLineLength = 0;
-      serialLineOverflow = false;
-      continue;
-    }
-
-    if (serialLineOverflow)
-    {
-      continue;
-    }
-
-    if (
-      serialLineLength <
-      SERIAL_LINE_BUFFER_SIZE - 1
-    )
-    {
-      serialLineBuffer[serialLineLength] = incoming;
-      serialLineLength++;
-    }
-    else
-    {
-      serialLineOverflow = true;
-    }
-  }
 }
 
 // ============================================================
@@ -1386,6 +2379,14 @@ void handleTouch()
   Serial.print(", ");
   Serial.println(touchY);
 
+  // Touch dismisses a structured information screen immediately.
+  if (weatherScreenActive)
+  {
+    Serial.println("Touch action: close WEATHER screen.");
+    dismissWeatherScreen();
+    return;
+  }
+  
   // Do not let touch interrupt LISTENING, THINKING, or TALKING.
   if (pcExpressionActive)
   {
@@ -1836,7 +2837,7 @@ void setup()
 
 void loop()
 {
-  // Serial remains available even when an asset error is visible.
+  // Serial remains available in every display state.
   updateSerialInput();
 
   if (!setupComplete)
@@ -1846,6 +2847,15 @@ void loop()
   }
 
   handleTouch();
+
+  // Structured information screens temporarily pause face animations.
+  if (weatherScreenActive)
+  {
+    updateWeatherScreen();
+    delay(1);
+    return;
+  }
+
   updateBehaviorTimers();
   updateRandomEvents();
   updateAnimation();
