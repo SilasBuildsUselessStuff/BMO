@@ -2206,6 +2206,71 @@ void processSerialLine(char* line)
       expressionPrefix + expressionName;
   }
 
+  // ============================================================
+// NON-BLOCKING SERIAL INPUT
+// ============================================================
+
+void updateSerialInput()
+{
+  while (Serial.available() > 0)
+  {
+    char incoming =
+      static_cast<char>(Serial.read());
+
+    // Ignore carriage returns. Newline completes the command.
+    if (incoming == '\r')
+    {
+      continue;
+    }
+
+    if (incoming == '\n')
+    {
+      if (serialLineOverflow)
+      {
+        Serial.println(
+          "SERIAL ERROR: Incoming line exceeded buffer."
+        );
+      }
+      else if (serialLineLength > 0)
+      {
+        serialLineBuffer[serialLineLength] = '\0';
+
+        processSerialLine(
+          serialLineBuffer
+        );
+      }
+
+      // Prepare the buffer for the next message.
+      serialLineLength = 0;
+      serialLineOverflow = false;
+
+      continue;
+    }
+
+    // Ignore the remaining characters of an oversized line until its
+    // terminating newline arrives.
+    if (serialLineOverflow)
+    {
+      continue;
+    }
+
+    if (
+      serialLineLength <
+      SERIAL_LINE_BUFFER_SIZE - 1
+    )
+    {
+      serialLineBuffer[serialLineLength] =
+        incoming;
+
+      serialLineLength++;
+    }
+    else
+    {
+      serialLineOverflow = true;
+    }
+  }
+}
+
   Serial.print("Normalized command: [");
   Serial.print(command);
   Serial.println("]");
