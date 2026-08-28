@@ -39,6 +39,8 @@ class BMOApp(ttk.Frame):
         self.face_text = tk.StringVar(value="^_^")
         self.status_text = tk.StringVar(value="idle")
         self.expression_text = tk.StringVar(value="IDLE")
+        self.screen_text = tk.StringVar(value="FACE")
+        self.tool_display_text = tk.StringVar(value="—")
         self.connection_text = tk.StringVar(value="DISCONNECTED")
 
         self.serial_error_text = tk.StringVar(value="")
@@ -149,10 +151,18 @@ class BMOApp(ttk.Frame):
             row=1,
             label="Expression:",
             value_variable=self.expression_text,
-        )
+
         self._add_information_row(
             information,
             row=2,
+            label="Screen:",
+            value_variable=self.screen_text,
+        )
+        
+        )
+        self._add_information_row(
+            information,
+            row=3,
             label="Connection:",
             value_variable=self.connection_text,
         )
@@ -164,7 +174,7 @@ class BMOApp(ttk.Frame):
             wraplength=550,
         )
         serial_error_label.grid(
-            row=3,
+            row=4,
             column=0,
             columnspan=2,
             sticky="w",
@@ -178,7 +188,7 @@ class BMOApp(ttk.Frame):
             wraplength=550,
         )
         application_error_label.grid(
-            row=4,
+            row=5,
             column=0,
             columnspan=2,
             sticky="w",
@@ -213,6 +223,13 @@ class BMOApp(ttk.Frame):
             value_variable=self.bmo_response_text,
         )
 
+        self._add_information_row(
+            conversation,
+            row=2,
+            label="Display:",
+            value_variable=self.tool_display_text,
+        )
+        
         button_frame = ttk.Frame(content)
         button_frame.grid(
             row=3,
@@ -288,6 +305,10 @@ class BMOApp(ttk.Frame):
 
         self.status_text.set(snapshot.status.value)
         self.expression_text.set(snapshot.expression.value)
+        self.screen_text.set(snapshot.screen.value)
+        self.tool_display_text.set(
+            self._format_tool_display(snapshot)
+        )
         self.user_input_text.set(snapshot.last_user_input)
         self.bmo_response_text.set(snapshot.last_bmo_response)
 
@@ -344,6 +365,35 @@ class BMOApp(ttk.Frame):
             self.listen_button_text.set("LISTEN")
             self.listen_button.state(["!disabled"])
 
+        @staticmethod
+    def _format_tool_display(
+        snapshot: BMOStateSnapshot,
+    ) -> str:
+        """Create a concise debug summary of structured tool data."""
+
+        if not snapshot.display_type or not snapshot.display_data:
+            return "—"
+
+        if snapshot.display_type == "WEATHER":
+            data = snapshot.display_data
+
+            location = data.get("location", "Unknown location")
+            temperature = data.get("temperature_c")
+            condition = data.get("condition", "unknown conditions")
+
+            if isinstance(temperature, (int, float)):
+                return (
+                    f"WEATHER — {location}: "
+                    f"{temperature:.1f} °C, {condition}"
+                )
+
+            return f"WEATHER — {location}: {condition}"
+
+        return (
+            f"{snapshot.display_type} — "
+            f"{snapshot.display_data}"
+        )
+    
     @staticmethod
     def _face_for_expression(snapshot: BMOStateSnapshot) -> str:
         """Return a simple debug face for the current expression."""
@@ -374,6 +424,18 @@ class BMOApp(ttk.Frame):
         self.on_close()
 
 
-//.\.venv\Scripts\python.exe -c "from main import main; from core.assistant import BMOAssistant; from voice.tts import TTSProvider, WindowsTTS; print('V0.4 integration loaded successfully')"
 
-//.\.venv\Scripts\python.exe main.py
+
+
+
+//.\.venv\Scripts\python.exe -m py_compile `
+    main.py `
+    core\state.py `
+    core\assistant.py `
+    ui\app.py
+
+
+
+//.\.venv\Scripts\python.exe -c "from main import main; print('Weather application integration loaded successfully')"
+
+.\.venv\Scripts\python.exe main.py
