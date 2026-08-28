@@ -66,7 +66,11 @@ class CurrentWeather:
             f"Feels like: {self.apparent_temperature_c:.1f} °C\n"
             f"Relative humidity: {self.relative_humidity_percent}%\n"
             f"Precipitation: {self.precipitation_mm:.1f} mm\n"
-            f"Wind speed: {self.wind_speed_kmh:.1f} km/h"
+            f"Wind speed: {self.wind_speed_kmh:.1f} km/h\n"
+            f"Response guidance: Give a short natural summary. Normally "
+            f"mention only the current temperature and condition. Mention "
+            f"precipitation if it is currently relevant. Do not list every "
+            f"field unless the user asks for details."
         )
 
 
@@ -109,7 +113,12 @@ class DailyForecast:
             f"{self.precipitation_sum_mm:.1f} mm\n"
             f"Maximum wind speed: {self.wind_speed_max_kmh:.1f} km/h\n"
             f"Sunrise: {self.sunrise}\n"
-            f"Sunset: {self.sunset}"
+            f"Sunset: {self.sunset}\n"
+            f"Response guidance: Give a short natural summary. Normally "
+            f"mention the temperature range, overall condition, and chance "
+            f"of rain. Do not list wind, sunrise, sunset, or every field "
+            f"unless the user asks for details or the conditions are "
+            f"important or hazardous."
         )
 
 
