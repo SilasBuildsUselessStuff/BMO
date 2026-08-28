@@ -58,7 +58,10 @@ class BMOApp(ttk.Frame):
 
         # Poll the thread-safe state. Background threads never update
         # Tkinter widgets directly.
-        self.after(self.UPDATE_INTERVAL_MS, self._refresh_from_state)
+        self.after(
+            self.UPDATE_INTERVAL_MS,
+            self._refresh_from_state,
+        )
 
     def _configure_styles(self) -> None:
         """Configure the visual style of the development GUI."""
@@ -108,7 +111,10 @@ class BMOApp(ttk.Frame):
             pady=(0, 10),
         )
 
-        content = ttk.Frame(self, padding=15)
+        content = ttk.Frame(
+            self,
+            padding=15,
+        )
         content.grid(
             row=1,
             column=0,
@@ -137,7 +143,6 @@ class BMOApp(ttk.Frame):
             sticky="ew",
             padx=20,
         )
-
         information.columnconfigure(1, weight=1)
 
         self._add_information_row(
@@ -146,11 +151,13 @@ class BMOApp(ttk.Frame):
             label="Status:",
             value_variable=self.status_text,
         )
+
         self._add_information_row(
             information,
             row=1,
             label="Expression:",
             value_variable=self.expression_text,
+        )
 
         self._add_information_row(
             information,
@@ -158,8 +165,7 @@ class BMOApp(ttk.Frame):
             label="Screen:",
             value_variable=self.screen_text,
         )
-        
-        )
+
         self._add_information_row(
             information,
             row=3,
@@ -207,7 +213,6 @@ class BMOApp(ttk.Frame):
             padx=20,
             pady=(15, 15),
         )
-
         conversation.columnconfigure(1, weight=1)
 
         self._add_information_row(
@@ -216,6 +221,7 @@ class BMOApp(ttk.Frame):
             label="You:",
             value_variable=self.user_input_text,
         )
+
         self._add_information_row(
             conversation,
             row=1,
@@ -229,7 +235,7 @@ class BMOApp(ttk.Frame):
             label="Display:",
             value_variable=self.tool_display_text,
         )
-        
+
         button_frame = ttk.Frame(content)
         button_frame.grid(
             row=3,
@@ -284,8 +290,8 @@ class BMOApp(ttk.Frame):
         """
         Handle the voice button.
 
-        Starting and stopping the sounddevice stream are quick operations.
-        Slow Whisper processing runs in the assistant's worker thread.
+        Slow Whisper, Ollama, tool, and TTS operations run outside the
+        Tkinter GUI thread.
         """
 
         self.assistant.toggle_listening()
@@ -294,8 +300,7 @@ class BMOApp(ttk.Frame):
         """
         Refresh GUI values from the central state.
 
-        This method runs only on Tkinter's main thread. It is safe for it to
-        update widgets after reading the thread-safe state snapshot.
+        This method runs only on Tkinter's main thread.
         """
 
         if self._closing:
@@ -306,18 +311,25 @@ class BMOApp(ttk.Frame):
         self.status_text.set(snapshot.status.value)
         self.expression_text.set(snapshot.expression.value)
         self.screen_text.set(snapshot.screen.value)
+
         self.tool_display_text.set(
             self._format_tool_display(snapshot)
         )
+
         self.user_input_text.set(snapshot.last_user_input)
         self.bmo_response_text.set(snapshot.last_bmo_response)
 
         self._update_connection_display(snapshot)
         self._update_voice_display(snapshot)
 
-        self.face_text.set(self._face_for_expression(snapshot))
+        self.face_text.set(
+            self._face_for_expression(snapshot)
+        )
 
-        self.after(self.UPDATE_INTERVAL_MS, self._refresh_from_state)
+        self.after(
+            self.UPDATE_INTERVAL_MS,
+            self._refresh_from_state,
+        )
 
     def _update_connection_display(
         self,
@@ -335,7 +347,9 @@ class BMOApp(ttk.Frame):
         serial_error = self.assistant.connection.last_error
 
         if serial_error:
-            self.serial_error_text.set(f"Serial: {serial_error}")
+            self.serial_error_text.set(
+                f"Serial: {serial_error}"
+            )
         else:
             self.serial_error_text.set("")
 
@@ -343,7 +357,7 @@ class BMOApp(ttk.Frame):
         self,
         snapshot: BMOStateSnapshot,
     ) -> None:
-        """Update voice errors and LISTEN button state."""
+        """Update interaction errors and LISTEN button state."""
 
         if snapshot.error_message:
             self.application_error_text.set(
@@ -355,17 +369,20 @@ class BMOApp(ttk.Frame):
         if snapshot.thinking:
             self.listen_button_text.set("THINKING...")
             self.listen_button.state(["disabled"])
+
         elif snapshot.speaking:
             self.listen_button_text.set("TALKING...")
             self.listen_button.state(["disabled"])
+
         elif snapshot.listening:
             self.listen_button_text.set("STOP LISTENING")
             self.listen_button.state(["!disabled"])
+
         else:
             self.listen_button_text.set("LISTEN")
             self.listen_button.state(["!disabled"])
 
-        @staticmethod
+    @staticmethod
     def _format_tool_display(
         snapshot: BMOStateSnapshot,
     ) -> str:
@@ -377,9 +394,15 @@ class BMOApp(ttk.Frame):
         if snapshot.display_type == "WEATHER":
             data = snapshot.display_data
 
-            location = data.get("location", "Unknown location")
+            location = data.get(
+                "location",
+                "Unknown location",
+            )
             temperature = data.get("temperature_c")
-            condition = data.get("condition", "unknown conditions")
+            condition = data.get(
+                "condition",
+                "unknown conditions",
+            )
 
             if isinstance(temperature, (int, float)):
                 return (
@@ -393,9 +416,11 @@ class BMOApp(ttk.Frame):
             f"{snapshot.display_type} — "
             f"{snapshot.display_data}"
         )
-    
+
     @staticmethod
-    def _face_for_expression(snapshot: BMOStateSnapshot) -> str:
+    def _face_for_expression(
+        snapshot: BMOStateSnapshot,
+    ) -> str:
         """Return a simple debug face for the current expression."""
 
         faces = {
@@ -412,7 +437,10 @@ class BMOApp(ttk.Frame):
             BMOExpression.ANGRY: ">_<",
         }
 
-        return faces.get(snapshot.expression, "^_^")
+        return faces.get(
+            snapshot.expression,
+            "^_^",
+        )
 
     def _handle_close(self) -> None:
         """Prevent duplicate close operations."""
