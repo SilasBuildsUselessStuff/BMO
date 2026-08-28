@@ -642,7 +642,7 @@ void buildFramePath(
 
 bool drawPngFrame(const char* path)
 {
-  // Open the file briefly to verify that it exists and is not empty.
+  // Open briefly to verify that the file exists and is not empty.
   File pngFile = SD.open(path, FILE_READ);
 
   if (!pngFile)
@@ -662,7 +662,6 @@ bool drawPngFrame(const char* path)
     return false;
   }
 
-  // Memory information is useful while diagnosing unusually large frames.
   Serial.print("PNG size: ");
   Serial.print(pngSize);
 
@@ -672,10 +671,12 @@ bool drawPngFrame(const char* path)
   Serial.print(" | Largest block: ");
   Serial.println(ESP.getMaxAllocHeap());
 
-  // Decode directly from the SD card instead of loading the complete PNG
-  // into one large heap allocation.
+  // LovyanGFX has a wrapper for fs::FS, but this installed version does not
+  // recognize the more specific fs::SDFS type returned by SD directly.
+  fs::FS& filesystem = SD;
+
   bool drawResult = display.drawPngFile(
-    SD,
+    filesystem,
     path,
     0,
     0
@@ -690,7 +691,6 @@ bool drawPngFrame(const char* path)
 
   return true;
 }
-
 // ============================================================
 // DRAW CURRENT ANIMATION FRAME
 // ============================================================
