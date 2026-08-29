@@ -98,11 +98,56 @@ class OllamaClient(AIClient):
             messages = self._build_messages(cleaned_text)
             tool_results: list[ToolResult] = []
 
+            # If the model initially ignores the weather tools, it receives
+            # one strict retry. This prevents it from inventing live weather.
+            weather_tool_retry_used = False
+
             for _round in range(self.max_tool_rounds + 1):
                 message = self._request_message(messages)
                 tool_calls = message.get("tool_calls")
 
                 if not tool_calls:
+                    # Weather is time-sensitive. If Ollama tries to answer
+                    # without a tool, discard that ungrounded answer and give
+                    # it one explicit tool-call retry.
+                    if (
+                        not tool_results
+                        and self._requires_weather_tool(cleaned_text)
+                        and self._weather_tools_are_available()
+                    ):
+                        if weather_tool_retry_used:
+                            raise AIError(
+                                "The AI did not use the required weather tool."
+                            )
+
+                        weather_tool_retry_used = True
+
+                        print(
+                            "AI routing: weather request did not use a tool; "
+                            "forcing one retry."
+                        )
+
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "The current user request requires live "
+                                    "weather data. Do not answer from memory "
+                                    "or conversation history. You must call "
+                                    "get_current_weather for present "
+                                    "conditions or "
+                                    "get_daily_weather_forecast for today "
+                                    "or a future day. If no location was "
+                                    "named, omit the location argument so "
+                                    "the configured default is used. Return "
+                                    "no natural-language answer until after "
+                                    "the tool result is available."
+                                ),
+                            }
+                        )
+
+                        continue
+
                     content = message.get("content")
 
                     if not isinstance(content, str) or not content.strip():
