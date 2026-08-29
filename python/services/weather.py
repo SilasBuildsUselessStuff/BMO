@@ -67,10 +67,12 @@ class CurrentWeather:
             f"Relative humidity: {self.relative_humidity_percent}%\n"
             f"Precipitation: {self.precipitation_mm:.1f} mm\n"
             f"Wind speed: {self.wind_speed_kmh:.1f} km/h\n"
-            f"Response guidance: Give a short natural summary. Normally "
-            f"mention only the current temperature and condition. Mention "
-            f"precipitation if it is currently relevant. Do not list every "
-            f"field unless the user asks for details."
+            f"MANDATORY RESPONSE RULE: For a normal current-weather "
+            f"question, answer in one short sentence and mention only the "
+            f"temperature and overall condition. Mention current rain if "
+            f"relevant. Do not mention humidity, wind, observation time, "
+            f"or every field unless the user explicitly asks for details "
+            f"or the conditions are hazardous."
         )
 
 
@@ -114,11 +116,12 @@ class DailyForecast:
             f"Maximum wind speed: {self.wind_speed_max_kmh:.1f} km/h\n"
             f"Sunrise: {self.sunrise}\n"
             f"Sunset: {self.sunset}\n"
-            f"Response guidance: Give a short natural summary. Normally "
-            f"mention the temperature range, overall condition, and chance "
-            f"of rain. Do not list wind, sunrise, sunset, or every field "
-            f"unless the user asks for details or the conditions are "
-            f"important or hazardous."
+            f"MANDATORY RESPONSE RULE: For a normal forecast question, "
+            f"answer in one or two short sentences and mention only the "
+            f"temperature range, overall condition, and rain probability. "
+            f"Do not mention precipitation amount, wind speed, sunrise, or "
+            f"sunset unless the user explicitly requested that information "
+            f"or the conditions are hazardous."
         )
 
 
