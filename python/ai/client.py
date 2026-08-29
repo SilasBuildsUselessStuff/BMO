@@ -228,6 +228,60 @@ class OllamaClient(AIClient):
         with self._generation_lock:
             return len(self._history)
 
+    def _weather_tools_are_available(self) -> bool:
+        """Return whether a weather tool is currently registered."""
+
+        if self.tool_registry is None:
+            return False
+
+        available_names = set(self.tool_registry.names)
+
+        return bool(
+            {
+                "get_current_weather",
+                "get_daily_weather_forecast",
+            }
+            & available_names
+        )
+
+    @staticmethod
+    def _requires_weather_tool(user_text: str) -> bool:
+        """
+        Detect requests that require live weather information.
+
+        This is intentionally a routing safeguard, not a full natural-language
+        parser. Ollama still chooses between current conditions and forecast
+        and extracts the requested location.
+        """
+
+        normalized = user_text.casefold()
+
+        weather_terms = (
+            "weather",
+            "forecast",
+            "temperature",
+            "rain",
+            "raining",
+            "snow",
+            "snowing",
+            "sunny",
+            "cloudy",
+            "windy",
+            "wind speed",
+            "sunrise",
+            "sunset",
+            "how warm",
+            "how hot",
+            "how cold",
+        )
+
+        return any(
+            term in normalized
+            for term in weather_terms
+        )
+
+    
+    
     def _request_message(
         self,
         messages: list[dict[str, Any]],
