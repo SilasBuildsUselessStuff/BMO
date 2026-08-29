@@ -203,6 +203,10 @@ class BMOAssistant:
                 self.state.set_last_user_input("—")
                 self.state.set_error("No speech was detected.")
                 print("Whisper: No speech was detected.")
+
+                self._deliver_fallback_response(
+                    "I didn't catch that. Can you repeat it?"
+                )
                 return
 
             self.state.set_last_user_input(transcript)
@@ -249,12 +253,19 @@ class BMOAssistant:
                 self.state.set_error(message)
                 print(message)
 
+                self._deliver_fallback_response(
+                    "I didn't catch that. Can you repeat it?"
+                )
+
         except AIError as error:
             if not self._shutdown_event.is_set():
                 message = f"AI: {error}"
                 self.state.set_error(message)
-                self.state.set_last_bmo_response("—")
                 print(message)
+
+                self._deliver_fallback_response(
+                    "I didn't quite get that. Can you repeat it?"
+                )
 
         except TTSError as error:
             if not self._shutdown_event.is_set():
@@ -263,16 +274,48 @@ class BMOAssistant:
                 print(message)
 
         except Exception as error:
-            # Protect the application from unexpected library-level errors.
             if not self._shutdown_event.is_set():
                 message = f"Unexpected interaction error: {error}"
                 self.state.set_error(message)
                 print(message)
 
+                self._deliver_fallback_response(
+                    "Oops, I didn't quite get that. Can you repeat it?"
+                )
+
         finally:
             if not self._shutdown_event.is_set():
                 self.enter_idle()
 
+    def _deliver_fallback_response(
+        self,
+        text: str = "I didn't quite get that. Can you repeat it?",
+    ) -> None:
+        """
+        Display and speak a short fallback after a recoverable failure.
+
+        This method runs in the existing interaction worker, so blocking TTS
+        playback does not freeze Tkinter.
+        """
+
+        if self._shutdown_event.is_set():
+            return
+
+        self.state.set_last_bmo_response(text)
+        print(f"BMO: {text}")
+
+        if self.tts is None:
+            return
+
+        self.enter_talking()
+
+        try:
+            self.tts.speak(text)
+        except TTSError as error:
+            message = f"TTS: {error}"
+            self.state.set_error(message)
+            print(message)
+    
     def _send_expression(self, expression: BMOExpression) -> bool:
         """Send one expression command to the ESP32."""
 
