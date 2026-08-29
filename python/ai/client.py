@@ -1,6 +1,8 @@
 """Provider-independent AI interface and local Ollama implementation."""
 
 import json
+import re
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from threading import RLock
@@ -116,9 +118,61 @@ class OllamaClient(AIClient):
                         and self._weather_tools_are_available()
                     ):
                         if weather_tool_retry_used:
-                            raise AIError(
-                                "The AI did not use the required weather tool."
+                            # Ollama ignored the weather tool twice. Execute
+                            # the correct weather service deterministically
+                            # instead of abandoning the interaction.
+                            tool_name, arguments = (
+                                self._build_weather_fallback_call(
+                                    cleaned_text
+                                )
                             )
+
+                            print(
+                                "AI routing: Ollama still ignored the "
+                                f"weather tool; executing {tool_name} "
+                                f"directly with {arguments}."
+                            )
+
+                            try:
+                                result = self.tool_registry.execute(
+                                    tool_name,
+                                    arguments,
+                                )
+
+                                tool_results.append(result)
+                                tool_content = result.text
+
+                            except ToolExecutionError as error:
+                                tool_content = f"Tool error: {error}"
+
+                            # Add a synthetic tool call and its result to the
+                            # conversation so Ollama can now summarize the
+                            # verified data naturally.
+                            messages.append(
+                                {
+                                    "role": "assistant",
+                                    "content": "",
+                                    "tool_calls": [
+                                        {
+                                            "type": "function",
+                                            "function": {
+                                                "name": tool_name,
+                                                "arguments": arguments,
+                                            },
+                                        }
+                                    ],
+                                }
+                            )
+
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "content": tool_content,
+                                    "tool_name": tool_name,
+                                }
+                            )
+
+                            continue
 
                         weather_tool_retry_used = True
 
@@ -228,6 +282,197 @@ class OllamaClient(AIClient):
         with self._generation_lock:
             return len(self._history)
 
+
+    def _build_weather_fallback_call(
+        self,
+        user_text: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        Build a safe weather call if Ollama refuses to select a tool.
+
+        This fallback handles common current-weather and forecast phrases.
+        The weather service still applies its configured default location
+        whenever no explicit location is found.
+        """
+
+        normalized = user_text.casefold()
+        arguments: dict[str, Any] = {}
+
+        location = self._extract_weather_location(user_text)
+
+        if location:
+            arguments["location"] = location
+
+        day_offset = self._extract_forecast_day_offset(normalized)
+
+        forecast_terms = (
+            "forecast",
+            "tomorrow",
+            "day after tomorrow",
+            "in two days",
+            "in three days",
+            "in four days",
+            "in five days",
+            "in six days",
+        )
+
+        requires_forecast = (
+            day_offset is not None
+            or any(
+                term in normalized
+                for term in forecast_terms
+            )
+        )
+
+        available_names = (
+            set(self.tool_registry.names)
+            if self.tool_registry is not None
+            else set()
+        )
+
+        if (
+            requires_forecast
+            and "get_daily_weather_forecast" in available_names
+        ):
+            arguments["day_offset"] = (
+                day_offset
+                if day_offset is not None
+                else 1
+            )
+
+            return (
+                "get_daily_weather_forecast",
+                arguments,
+            )
+
+        if "get_current_weather" in available_names:
+            return (
+                "get_current_weather",
+                arguments,
+            )
+
+        if "get_daily_weather_forecast" in available_names:
+            arguments["day_offset"] = (
+                day_offset
+                if day_offset is not None
+                else 0
+            )
+
+            return (
+                "get_daily_weather_forecast",
+                arguments,
+            )
+
+        raise AIError(
+            "A weather request was detected, but no weather tool "
+            "is registered."
+        )
+
+    @staticmethod
+    def _extract_forecast_day_offset(
+        normalized_text: str,
+    ) -> int | None:
+        """Extract common forecast-day phrases from user text."""
+
+        if "day after tomorrow" in normalized_text:
+            return 2
+
+        if "tomorrow" in normalized_text:
+            return 1
+
+        if "today" in normalized_text:
+            return 0
+
+        number_words = {
+            "zero": 0,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+        }
+
+        match = re.search(
+            r"\bin\s+"
+            r"(zero|one|two|three|four|five|six|[0-6])"
+            r"\s+days?\b",
+            normalized_text,
+        )
+
+        if match is None:
+            return None
+
+        value = match.group(1)
+
+        if value.isdigit():
+            return int(value)
+
+        return number_words[value]
+
+    @staticmethod
+    def _extract_weather_location(
+        user_text: str,
+    ) -> str | None:
+        """
+        Extract common location phrases such as:
+
+            weather in Berlin
+            forecast for Palma de Mallorca
+            weather in Berlin in two days
+
+        This is a fallback only. Ollama normally supplies the arguments.
+        """
+
+        match = re.search(
+            r"\b(?:in|for|at)\s+"
+            r"(.+?)"
+            r"(?="
+            r"\s+in\s+"
+            r"(?:zero|one|two|three|four|five|six|[0-6])"
+            r"\s+days?\b"
+            r"|\s+(?:today|tomorrow|right now|now)\b"
+            r"|[?.!,]"
+            r"|$"
+            r")",
+            user_text,
+            flags=re.IGNORECASE,
+        )
+
+        if match is None:
+            return None
+
+        location = match.group(1).strip(" \t,.-")
+
+        # Remove polite words that may occur at the end.
+        location = re.sub(
+            r"\s+please$",
+            "",
+            location,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        temporal_phrases = {
+            "today",
+            "tomorrow",
+            "right now",
+            "now",
+            "one day",
+            "two days",
+            "three days",
+            "four days",
+            "five days",
+            "six days",
+        }
+
+        if (
+            not location
+            or location.casefold() in temporal_phrases
+        ):
+            return None
+
+        return location
+    
     def _weather_tools_are_available(self) -> bool:
         """Return whether a weather tool is currently registered."""
 
