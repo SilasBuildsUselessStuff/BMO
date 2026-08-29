@@ -51,13 +51,16 @@ WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 WHISPER_LANGUAGE = "en"
 
-# These hints help Whisper recognize the unusual name "BMO".
 WHISPER_INITIAL_PROMPT = (
     "This is a conversation with BMO, a small robot companion. "
-    "The robot's name is pronounced Beemo and spelled BMO."
+    "The robot's name is pronounced Beemo and spelled BMO. "
+    "The default weather location is Höpfingen, Germany, postal code 74746. "
+    "Other possible place names include Berlin and Palma de Mallorca."
 )
 
-WHISPER_HOTWORDS = "BMO, Beemo"
+WHISPER_HOTWORDS = (
+    "BMO, Beemo, Höpfingen, Adri, Palma de Mallorca"
+)
 
 
 # ---------------------------------------------------------------------------
